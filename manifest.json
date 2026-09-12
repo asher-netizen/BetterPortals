@@ -1,0 +1,9 @@
+{
+  "name": "BetterPortals",
+  "version_number": "0.3.3",
+  "website_url": "",
+  "description": "A Valheim-styled portal directory: walk into a named portal, choose any named destination, and travel without pairing tags. Includes longer portal names and configurable UI.",
+  "dependencies": [
+    "denikson-BepInExPack_Valheim-5.4.2350"
+  ]
+}

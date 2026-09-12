@@ -1,0 +1,9 @@
+bin/
+obj/
+.vs/
+*.dll
+*.pdb
+*.zip
+*.log
+*.user
+*.suo
