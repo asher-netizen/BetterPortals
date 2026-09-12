@@ -8,7 +8,7 @@ $dll = Join-Path $root 'bin\Release\net472\FraileyPortalSelector.dll'
 
 $checks = [ordered]@{
     BuiltArtifactExists = Test-Path -LiteralPath $dll
-    VersionIs046Everywhere = $source -match 'Version = "0\.4\.6"' -and $project -match '<Version>0\.4\.6</Version>' -and $manifest -match '"version_number": "0\.4\.6"'
+    VersionIs047Everywhere = $source -match 'Version = "0\.4\.7"' -and $project -match '<Version>0\.4\.7</Version>' -and $manifest -match '"version_number": "0\.4\.7"'
     CompatibilityIdentityPreserved = $source -match 'Guid = "com\.fraileywoodworks\.portalselector"' -and $project -match '<AssemblyName>FraileyPortalSelector</AssemblyName>'
     RpcNamesAreV2 = ([regex]::Matches($source, 'Plugin\.Guid \+ "\.v2\.[^"]+"').Count -eq 4) -and $source -match 'ProtocolVersion = 2'
     OldRpcNamesAreNotRegistered = $source -notmatch 'Plugin\.Guid \+ "\.directory\.' -and $source -notmatch 'Plugin\.Guid \+ "\.travel\.'
@@ -32,6 +32,9 @@ $checks = [ordered]@{
     LedgerIsWorldScoped = $source -match 'BetterPortals\.portal-order\.\{loadedWorld\}\.tsv'
     LegacyOrderIsDeterministic = $source -match 'OrderBy\(id => unchecked\(\(ulong\)id\.UserID\)\)\.ThenBy\(id => id\.ID\)'
     NewPortalOrderIsObserved = $source -match 'PortalOrderLoadPatch' -and $source -match 'PortalOrderObservationPatch' -and $source -match 'PrepareObservation' -and $source -match 'Orders\[zdo\.m_uid\] = nextOrder\+\+'
+    PortalObservationUsesNativePrefabFilter = $source -match 'game && game\.PortalPrefabHash != null && game\.PortalPrefabHash\.Contains\(prefabHash\)'
+    OrdinaryObjectsCannotInitializeLedger = $source -match '__state = IsPortalPrefab\(__1\)' -and $source -match 'if \(__state\) PortalOrderLedger\.PrepareObservation\(\)'
+    OrdinaryObjectsCannotWriteLedger = $source -match 'Postfix\(ZDO __0, bool __state\)' -and $source -match 'if \(__state\) PortalOrderLedger\.Observe\(__0\)'
     LedgerWriteIsAtomicWhenSupported = $source -match 'File\.Replace\(temporary, path, null\)' -and $source -match 'File\.Move\(temporary, path\)'
     HomeIsPerCharacterPerWorld = $source -match 'home\.v1\.' -and $source -match 'Player\.m_localPlayer' -and $source -match 'player\.m_customData' -and $source -match 'world\.GetWorldUID\(\)'
     HomeIdentityIsStrictlyParsed = $source -match 'raw\.Split\('':''\)' -and $source -match 'long\.TryParse' -and $source -match 'uint\.TryParse' -and $source -match 'new ZDOID\(user, value\)'
@@ -76,3 +79,4 @@ $checks = [ordered]@{
 
 $checks.GetEnumerator() | ForEach-Object { '{0}: {1}' -f $_.Key, $(if ($_.Value) { 'PASS' } else { 'FAIL' }) }
 if ($checks.Values -contains $false) { exit 1 }
+& (Join-Path $PSScriptRoot 'PortalOrderGuardChecks.ps1')

@@ -1,6 +1,6 @@
 {
   "name": "BetterPortals",
-  "version_number": "0.4.6",
+  "version_number": "0.4.7",
   "website_url": "https://github.com/asher-netizen/BetterPortals",
   "description": "A Valheim-styled portal directory with Home shortcuts, biome labels and sorting, longer portal names, and configurable native-style UI.",
   "dependencies": [

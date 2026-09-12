@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.7
+
+- Restricted creation-order observation to Valheim's recognized portal prefabs. Ordinary objects received from players no longer initialize, enter, or trigger writes to the portal ledger.
+- Preserved the tested 0.4.6 selector appearance, controls, detection range, and responsiveness unchanged.
+
 ## 0.4.6
 
 - Restored native menu sizing after prewarming by using Valheim's live GuiScaler, including resolution changes and the player's GUI Scale setting.

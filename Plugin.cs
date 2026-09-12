@@ -18,7 +18,7 @@ public sealed class Plugin : BaseUnityPlugin
 {
     public const string Guid = "com.fraileywoodworks.portalselector";
     public const string Name = "BetterPortals";
-    public const string Version = "0.4.6";
+    public const string Version = "0.4.7";
     internal const int MaxNameLength = 32;
     internal static Plugin Instance;
     internal static readonly Harmony Harmony = new(Guid);
@@ -478,8 +478,24 @@ internal static class PortalOrderLoadPatch
 [HarmonyPatch(typeof(ZDOMan), "AddIfPortal")]
 internal static class PortalOrderObservationPatch
 {
-    private static void Prefix() => PortalOrderLedger.PrepareObservation();
-    private static void Postfix(ZDO __0) => PortalOrderLedger.Observe(__0);
+    private static bool IsPortalPrefab(int prefabHash)
+    {
+        var game = Game.instance;
+        return game && game.PortalPrefabHash != null && game.PortalPrefabHash.Contains(prefabHash);
+    }
+
+    private static void Prefix(int __1, out bool __state)
+    {
+        // AddIfPortal also receives ordinary objects. Match the native prefab
+        // filter before initializing or writing the portal-order ledger.
+        __state = IsPortalPrefab(__1);
+        if (__state) PortalOrderLedger.PrepareObservation();
+    }
+
+    private static void Postfix(ZDO __0, bool __state)
+    {
+        if (__state) PortalOrderLedger.Observe(__0);
+    }
 }
 
 internal static class PortalRanges
