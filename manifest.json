@@ -1,8 +1,8 @@
 {
   "name": "BetterPortals",
-  "version_number": "0.3.3",
-  "website_url": "",
-  "description": "A Valheim-styled portal directory: walk into a named portal, choose any named destination, and travel without pairing tags. Includes longer portal names and configurable UI.",
+  "version_number": "0.4.6",
+  "website_url": "https://github.com/asher-netizen/BetterPortals",
+  "description": "A Valheim-styled portal directory with Home shortcuts, biome labels and sorting, longer portal names, and configurable native-style UI.",
   "dependencies": [
     "denikson-BepInExPack_Valheim-5.4.2350"
   ]

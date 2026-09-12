@@ -1,0 +1,78 @@
+$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $PSScriptRoot
+$source = Get-Content -Raw -LiteralPath (Join-Path $root 'Plugin.cs')
+$project = Get-Content -Raw -LiteralPath (Join-Path $root 'FraileyPortalSelector.csproj')
+$manifest = Get-Content -Raw -LiteralPath (Join-Path $root 'manifest.json')
+$readme = Get-Content -Raw -LiteralPath (Join-Path $root 'README.md')
+$dll = Join-Path $root 'bin\Release\net472\FraileyPortalSelector.dll'
+
+$checks = [ordered]@{
+    BuiltArtifactExists = Test-Path -LiteralPath $dll
+    VersionIs046Everywhere = $source -match 'Version = "0\.4\.6"' -and $project -match '<Version>0\.4\.6</Version>' -and $manifest -match '"version_number": "0\.4\.6"'
+    CompatibilityIdentityPreserved = $source -match 'Guid = "com\.fraileywoodworks\.portalselector"' -and $project -match '<AssemblyName>FraileyPortalSelector</AssemblyName>'
+    RpcNamesAreV2 = ([regex]::Matches($source, 'Plugin\.Guid \+ "\.v2\.[^"]+"').Count -eq 4) -and $source -match 'ProtocolVersion = 2'
+    OldRpcNamesAreNotRegistered = $source -notmatch 'Plugin\.Guid \+ "\.directory\.' -and $source -notmatch 'Plugin\.Guid \+ "\.travel\.'
+    RpcRequestsUseBoundedPackages = $source -match 'Register<ZPackage>\(DirectoryRequest' -and $source -match 'Register<ZPackage>\(TravelRequest' -and ([regex]::Matches($source, 'ReadInt\(\) != ProtocolVersion').Count -eq 4)
+    ServerValidatesSourceAndRate = $source -match '!RateAllowed\(sender\)' -and $source -match '!NearSource\(sender, source\)'
+    LocalHostRequestsUseLocalPlayerDistance = $source -match 'net\.IsServer\(\) && sender == ZNet\.GetUID\(\)' -and $source -match 'Player\.m_localPlayer' -and $source -match 'local\.transform\.position, source\.GetPosition\(\)'
+    RemoteRequestsStillUsePeerDistance = $source -match 'var peer = net\.GetPeer\(sender\)' -and $source -match 'peer\.m_refPos, source\.GetPosition\(\)'
+    TravelRemainsServerValidated = $source -match 'session\.Destinations\.Contains\(destinationId\)' -and $source -match '!TryPortal\(destinationId, out var destination\)' -and $source -match 'destinationId == sourceId'
+    DirectoryIsBounded = $source -match '\.Take\(512\)' -and $source -match 'count < 0 \|\| count > 512'
+    MalformedTrafficFailsClosed = ([regex]::Matches($source, 'Rejected malformed portal (directory request|directory response|travel request|travel response)').Count -eq 4)
+    BiomeIsServerDerived = $source -match 'WorldGenerator\.instance' -and $source -match 'generator\.GetBiome\(z\.GetPosition\(\)\)'
+    BiomeOrderIsFixed = $source -match 'Heightmap\.Biome\.Meadows => 0' -and $source -match 'Heightmap\.Biome\.Ocean => 8'
+    BiomeDataIsSerialized = $source -match 'response\.Write\(\(int\)portal\.Biome\)' -and $source -match 'PortalBiomes\.Normalize\(package\.ReadInt\(\)\)'
+    BiomeUsesStackedSeparateText = $source -match 'Portal Name and Biome' -and $source -match 'VerticalLayoutGroup' -and $source -match 'out TMP_Text biomeText' -and $source -notmatch 'richText = true'
+    BiomeVisualsAreConfigurable = $source -match 'Show Biome Subtitle' -and $source -match 'Biome Font Size' -and $source -match 'Biome Color'
+    BiomeHeadingsAreRemoved = $source -notmatch 'AddBiomeHeader' -and $source -notmatch 'Show Biome Group Headers' -and $source -notmatch 'biomeHeaders'
+    PortalAndBiomeDefaultToWhite = $source -match 'DefaultEntryColor = "#FFFFFFFF"' -and $source -match 'DefaultBiomeColor = "#FFFFFFFF"'
+    BiomeAndHomeMarkerAreFortyPercentSmaller = $source -match 'DefaultBiomeFontSize = 9\.3f' -and $source -match 'DefaultHomeIconSize = 13\.2f'
+    BiomeSortPrecedesCreationOrder = $source -match 'OrderBy\(p => PortalBiomes\.Rank\(p\.Biome\)\)[\s\S]*ThenBy\(p => p\.CreationOrder\)'
+    LedgerIsOutsideWorldSave = $source -match 'Path\.Combine\(Paths\.ConfigPath' -and $source -notmatch 'CreationTimeKey' -and $source -notmatch 'zdo\.Set\('
+    LedgerIsWorldScoped = $source -match 'BetterPortals\.portal-order\.\{loadedWorld\}\.tsv'
+    LegacyOrderIsDeterministic = $source -match 'OrderBy\(id => unchecked\(\(ulong\)id\.UserID\)\)\.ThenBy\(id => id\.ID\)'
+    NewPortalOrderIsObserved = $source -match 'PortalOrderLoadPatch' -and $source -match 'PortalOrderObservationPatch' -and $source -match 'PrepareObservation' -and $source -match 'Orders\[zdo\.m_uid\] = nextOrder\+\+'
+    LedgerWriteIsAtomicWhenSupported = $source -match 'File\.Replace\(temporary, path, null\)' -and $source -match 'File\.Move\(temporary, path\)'
+    HomeIsPerCharacterPerWorld = $source -match 'home\.v1\.' -and $source -match 'Player\.m_localPlayer' -and $source -match 'player\.m_customData' -and $source -match 'world\.GetWorldUID\(\)'
+    HomeIdentityIsStrictlyParsed = $source -match 'raw\.Split\('':''\)' -and $source -match 'long\.TryParse' -and $source -match 'uint\.TryParse' -and $source -match 'new ZDOID\(user, value\)'
+    HomeUsesCharacterDataWithoutBlockingClickSave = $source -match 'player\.m_customData\[key\]' -and $source -notmatch 'Game\.instance\.SavePlayerProfile\(' -and $source -match 'clearing \? PortalHome\.Clear\(\) : PortalHome\.Set\(portal\.Id\)'
+    StaleHomeIsAuthoritativelyCleared = $source -match 'response\.Write\(homeValid\)' -and $source -match '!homeValid \|\|' -and $source -match 'Home portal unavailable — choose a new Home'
+    CurrentSourceDoesNotEraseHome = $source -match 'home != source && !currentPortals\.Any' -and $source -match 'savedHome != sourceId'
+    NativeFavoriteStarIsUsed = $source -match 'BuildUiPieceButton' -and $source -match 'm_favoriteStar'
+    SymmetricNativeHomeStarsAreBuilt = $source -match 'Left Home Favorite Star' -and $source -match 'Right Home Favorite Star' -and $source -match 'new\[\] \{ leftHomeIcon, rightHomeIcon \}'
+    MissingStarIconsHaveSymmetricTextFallbacks = ([regex]::Matches($source, 'AddText\(group\.transform, "★"').Count -eq 2) -and $source -match 'isHome && !hasNativeHomeStars'
+    RightClickSetsHome = $source -match 'IPointerClickHandler' -and $source -match 'PointerEventData\.InputButton\.Right' -and $source -match 'eventData\.Use\(\)'
+    KeyboardAndControllerCanToggleHome = $source -match 'Set Home Keyboard Shortcut' -and $source -match 'SetHomeKeyboardShortcut\.IsDown\(\)' -and $source -match 'GetButtonDown\("JoyButtonX"\)'
+    ConfirmUsesSelectedRow = $source -match 'KeyCode\.Return' -and $source -match 'KeyCode\.KeypadEnter' -and $source -match 'GetButtonDown\("JoyButtonA"\)' -and $source -match 'row\?\.Activate\(\)' -and $source -notmatch 'GetButtonDown\("JoyButtonY"\)'
+    FirstUnmodifiedConfirmPrefersHome = $source -match '!mouseChoiceArmed && homeSelectable' -and $source -match 'ArmMouseChoiceAfterMovement'
+    HomeIsPreferredAndScrolled = $source -match 'Prefer Home On Open' -and $source -match 'homeSelectable \? homeSelectable : firstSelectable' -and $source -match 'ScrollIntoView\(homeSelectable\.gameObject\)'
+    HintsAdaptToInputFamily = $source -match 'Show Control Hints' -and $source -match '"A Travel     X Set Home     B Close"' -and $source -match 'SetHomeKeyboardShortcut'
+    HomeMarkerRefreshesImmediately = $source -match 'row\.SetHome\(!clearing && row\.PortalId == portal\.Id\)'
+    HomeIconsAreNonRaycast = $source -match 'icon\.raycastTarget = false'
+    HoverScalesCombinedLabelGroup = $source -match 'visualRoot\.localScale = Vector3\.one \* scale'
+    RowsUseOneCenteredFullWidthCoordinateSpace = $source -match 'contentLayout\.childControlWidth = true' -and $source -match 'contentLayout\.childForceExpandWidth = true' -and $source -match 'rect\.anchorMin = rect\.anchorMax = new Vector2\(\.5f, 1f\)' -and $source -match 'rowLayout\.flexibleWidth = 1f'
+    PanelDefaultsToVerticalCenter = $source -match 'DefaultPanelYOffset = 0f' -and $source -match 'Approximately\(panelYOffset\.Value, 120f\)'
+    EachRowGetsAnIsolatedKnotPair = $source -match 'CreateNormalizedRowKnots' -and $source -match 'BetterPortals Left Knot' -and $source -match 'BetterPortals Right Knot' -and $source -match 'native\.enabled = false'
+    RowKnotsTrackPerRowRenderedTitle = $source -match 'TryGetRenderedTitleBounds' -and $source -match 'text\.textBounds' -and $source -match 'IncludeRectBounds\(homeIcon\.rectTransform' -and $source -notmatch 'LayoutUtility\.GetPreferredWidth\(visualRect\)'
+    RowKnotsUseNormalizedCenterGeometry = $source -match 'knotRect\.pivot = new Vector2\(\.5f, \.5f\)' -and $source -match 'knotRect\.sizeDelta = new Vector2' -and $source -match 'halfWidth = Mathf\.Abs\(knotRect\.rect\.width\) \* \.5f'
+    RightKnotIsMirrored = $source -match 'new Vector3\(side < 0f \? 1f : -1f, 1f, 1f\)'
+    RowKnotsHaveConfigurableGap = $source -match '"Row Knot Gap"'
+    RowKnotsFollowHoverAnimation = $source -match 'if \(knotsVisible\) PositionKnots\(\);'
+    NonHighlightedRowsSkipTextMeshMeasurement = $source -match 'private bool knotsVisible' -and $source -match 'knotsVisible = enabledByConfig && highlighted'
+    SelectorShellIsPrewarmedBeforePortalEntry = $source -match '!panel && Menu\.instance && Menu\.instance\.m_continueButton\) EnsureUi\(\)'
+    NativeHomeSpriteSearchIsCached = $source -match 'if \(nativeHomeSprite\) return nativeHomeSprite' -and $source -match 'nativeHomeSpriteSearchFrame == Time\.frameCount'
+    CursorReflectionIsPreparedOnce = $source -match 'private static void PrepareCursorWarp\(\)' -and $source -match 'if \(cursorWarpPrepared\) return'
+    EnterCannotOpenChatWhileSelectorOwnsInput = $source -match 'HarmonyPatch\(typeof\(Chat\), "Update"\)' -and $source -match '!PortalController\.CapturesInput'
+    ChatOpenMethodIsOrderIndependentlyBlocked = $source -match 'HarmonyPatch\(typeof\(Chat\), "InputText"\)' -and $source -match 'PortalChatOpenPatch'
+    CursorCentersCrossPlatformWhenSelectorOpens = $source -match 'WarpCursorPosition' -and $source -match 'Screen\.width \* \.5f' -and $source -match 'SynchronizeInputSelection\(true\)'
+    CursorIsExplicitlyReleasedOnEveryClosePath = $source -match 'fadeTarget = 0f;[\s\S]*ReleaseSelectorCursor\(\)' -and $source -match 'ZCursor\.Hide\(\)' -and $source -match 'ZCursor\.LockState = CursorLockMode\.Locked'
+    HomeToggleHudNotificationIsRemoved = $source -notmatch 'ShowStatus\(persisted \? "Home portal cleared"' -and $source -notmatch 'ShowStatus\(persisted \? \$"Home portal set'
+    NoPortalRewiring = $source -notmatch 'SetConnection|SetConnectedPortal|RPC_SetConnected|ForceSetConnection'
+    NamesRemainCapped = $source -match 'MaxNameLength = 32'
+    DedicatedSkipsClientUi = $source -match 'if \(!Application\.isBatchMode\)[\s\S]*gameObject\.AddComponent<PortalController>\(\)'
+    PublicSourceLinkPresent = $manifest -match 'https://github\.com/asher-netizen/BetterPortals'
+    DocumentationCoversHomeAndLegacyOrder = $readme -match 'controller \*\*A\*\* to travel' -and $readme -match 'Existing portals receive a deterministic initial order' -and $readme -match 'Back up or restore that small ledger'
+}
+
+$checks.GetEnumerator() | ForEach-Object { '{0}: {1}' -f $_.Key, $(if ($_.Value) { 'PASS' } else { 'FAIL' }) }
+if ($checks.Values -contains $false) { exit 1 }

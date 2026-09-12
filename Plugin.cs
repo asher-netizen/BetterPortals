@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using BepInEx;
 using BepInEx.Configuration;
@@ -16,7 +18,7 @@ public sealed class Plugin : BaseUnityPlugin
 {
     public const string Guid = "com.fraileywoodworks.portalselector";
     public const string Name = "BetterPortals";
-    public const string Version = "0.3.3";
+    public const string Version = "0.4.6";
     internal const int MaxNameLength = 32;
     internal static Plugin Instance;
     internal static readonly Harmony Harmony = new(Guid);
@@ -43,32 +45,39 @@ internal static class PortalVisualSettings
     internal const float DefaultTitleFontSize = 40f;
     internal const float DefaultEntryFontSize = 31f;
     internal const float DefaultHintFontSize = 17f;
+    internal const float DefaultBiomeFontSize = 9.3f;
+    internal const float DefaultHomeIconSize = 13.2f;
     internal const float DefaultOutlineWidth = 0f;
     internal const float DefaultHoverScale = 1.10f;
     internal const float DefaultHoverExpandSeconds = .08f;
     internal const float DefaultHoverContractSeconds = .10f;
     internal const float DefaultPanelWidth = 620f;
-    internal const float DefaultPanelYOffset = 120f;
+    internal const float DefaultPanelYOffset = 0f;
     internal const float DefaultRowHeight = 46f;
     internal const float DefaultRowSpacing = 2f;
     internal const float DefaultMaxListHeight = 414f;
     internal const float DefaultBackdropOpacity = 1f;
     internal const float DefaultFadeInSeconds = .06f;
     internal const float DefaultFadeOutSeconds = .05f;
-    internal const float DefaultTriggerMultiplier = 1.25f;
+    internal const float DefaultTriggerMultiplier = 1.5625f;
+    internal const float DefaultRowKnotGap = 18f;
 
     private const string DefaultTitleColor = "#FF8F00FF";
-    private const string DefaultEntryColor = "#DBDBDBFF";
+    private const string DefaultEntryColor = "#FFFFFFFF";
     private const string DefaultHintColor = "#B8B8B3FF";
+    private const string DefaultBiomeColor = "#FFFFFFFF";
     private const string DefaultOutlineColor = "#000000D9";
     private const string DefaultOrnamentColor = "#FF8F00FF";
 
     private static ConfigEntry<float> titleFontSize;
     private static ConfigEntry<float> entryFontSize;
     private static ConfigEntry<float> hintFontSize;
+    private static ConfigEntry<float> biomeFontSize;
+    private static ConfigEntry<float> homeIconSize;
     private static ConfigEntry<string> titleColor;
     private static ConfigEntry<string> entryColor;
     private static ConfigEntry<string> hintColor;
+    private static ConfigEntry<string> biomeColor;
     private static ConfigEntry<string> outlineColor;
     private static ConfigEntry<float> outlineWidth;
     private static ConfigEntry<float> hoverScale;
@@ -83,9 +92,14 @@ internal static class PortalVisualSettings
     private static ConfigEntry<string> ornamentColor;
     private static ConfigEntry<bool> showMenuOrnament;
     private static ConfigEntry<bool> showRowKnots;
+    private static ConfigEntry<float> rowKnotGap;
     private static ConfigEntry<float> fadeInSeconds;
     private static ConfigEntry<float> fadeOutSeconds;
     private static ConfigEntry<float> triggerMultiplier;
+    private static ConfigEntry<bool> showBiomeSubtitle;
+    private static ConfigEntry<bool> preferHomeOnOpen;
+    private static ConfigEntry<bool> showControlHints;
+    private static ConfigEntry<KeyboardShortcut> setHomeKeyboardShortcut;
 
     internal static void Bind(ConfigFile config)
     {
@@ -95,12 +109,18 @@ internal static class PortalVisualSettings
             "Destination row text size.");
         hintFontSize = BindRange(config, "Visual - Typography", "Hint Font Size", DefaultHintFontSize, 8f, 48f,
             "Size of the close-instruction text below the heading.");
+        biomeFontSize = BindRange(config, "Visual - Typography", "Biome Font Size", DefaultBiomeFontSize, 8f, 48f,
+            "Size of the optional biome subtitle beneath each portal name.");
+        homeIconSize = BindRange(config, "Visual - Typography", "Home Icon Size", DefaultHomeIconSize, 12f, 36f,
+            "Size of Valheim's native favorite-star icon beside the selected Home portal.");
         titleColor = BindColor(config, "Visual - Typography", "Title Color", DefaultTitleColor,
             "Heading color as #RRGGBB or #RRGGBBAA.");
         entryColor = BindColor(config, "Visual - Typography", "Entry Color", DefaultEntryColor,
             "Destination text color as #RRGGBB or #RRGGBBAA.");
         hintColor = BindColor(config, "Visual - Typography", "Hint Color", DefaultHintColor,
             "Instruction text color as #RRGGBB or #RRGGBBAA.");
+        biomeColor = BindColor(config, "Visual - Typography", "Biome Color", DefaultBiomeColor,
+            "Biome subtitle color as #RRGGBB or #RRGGBBAA.");
         outlineColor = BindColor(config, "Visual - Typography", "Font Outline Color", DefaultOutlineColor,
             "Text outline color as #RRGGBB or #RRGGBBAA.");
         outlineWidth = BindRange(config, "Visual - Typography", "Font Outline Width", DefaultOutlineWidth, 0f, 1f,
@@ -132,19 +152,48 @@ internal static class PortalVisualSettings
             "Show Valheim's native menu ornament behind the selector.");
         showRowKnots = config.Bind("Visual - Ornaments", "Show Row Knots", true,
             "Show the native knot marks beside a hovered or controller-selected destination.");
+        rowKnotGap = BindRange(config, "Visual - Ornaments", "Row Knot Gap", DefaultRowKnotGap, 0f, 100f,
+            "Horizontal gap between the rendered destination label and each native knot mark.");
 
         fadeInSeconds = BindRange(config, "Visual - Animation", "Fade In Duration", DefaultFadeInSeconds, .01f, 1f,
             "Seconds used for the selector fade-in.");
         fadeOutSeconds = BindRange(config, "Visual - Animation", "Fade Out Duration", DefaultFadeOutSeconds, .01f, 1f,
             "Seconds used for the selector fade-out.");
-        triggerMultiplier = BindRange(config, "Portal Interaction", "Portal Trigger Multiplier", DefaultTriggerMultiplier, 1f, 1.5f,
-            "Client-local trigger and open-menu range multiplier. The server still enforces its fixed 7.5-metre safety limit.");
+        triggerMultiplier = BindRange(config, "Portal Interaction", "Portal Trigger Multiplier", DefaultTriggerMultiplier, 1f, 2f,
+            "Client-local trigger and open-menu range multiplier. The server enforces a fixed 9.375-metre safety limit.");
+        showBiomeSubtitle = config.Bind("Portal List", "Show Biome Subtitle", true,
+            "Show the portal's biome in smaller white text beneath its name.");
+        preferHomeOnOpen = config.Bind("Portal List", "Prefer Home On Open", true,
+            "Select and scroll to the Home portal when the list opens.");
+        showControlHints = config.Bind("Portal List", "Show Control Hints", true,
+            "Show short keyboard or controller instructions above the destination list.");
+        setHomeKeyboardShortcut = config.Bind("Portal List", "Set Home Keyboard Shortcut", new KeyboardShortcut(KeyCode.H),
+            "Keyboard shortcut that sets or clears Home on the selected destination.");
 
-        Watch(titleFontSize); Watch(entryFontSize); Watch(hintFontSize); Watch(titleColor); Watch(entryColor); Watch(hintColor);
+        MigrateLegacyVisualDefaults(config);
+
+        Watch(titleFontSize); Watch(entryFontSize); Watch(hintFontSize); Watch(biomeFontSize); Watch(homeIconSize);
+        Watch(titleColor); Watch(entryColor); Watch(hintColor); Watch(biomeColor);
         Watch(outlineColor); Watch(outlineWidth); Watch(hoverScale); Watch(hoverExpandSeconds); Watch(hoverContractSeconds);
         Watch(panelWidth); Watch(panelYOffset); Watch(rowHeight); Watch(rowSpacing); Watch(maxListHeight); Watch(backdropOpacity);
-        Watch(ornamentColor); Watch(showMenuOrnament); Watch(showRowKnots); Watch(fadeInSeconds); Watch(fadeOutSeconds);
-        Watch(triggerMultiplier);
+        Watch(ornamentColor); Watch(showMenuOrnament); Watch(showRowKnots); Watch(rowKnotGap); Watch(fadeInSeconds); Watch(fadeOutSeconds);
+        Watch(triggerMultiplier); Watch(showBiomeSubtitle); Watch(preferHomeOnOpen);
+        Watch(showControlHints); Watch(setHomeKeyboardShortcut);
+    }
+
+    private static void MigrateLegacyVisualDefaults(ConfigFile config)
+    {
+        var changed = false;
+        if (Mathf.Approximately(biomeFontSize.Value, 15.5f)) { biomeFontSize.Value = DefaultBiomeFontSize; changed = true; }
+        if (Mathf.Approximately(homeIconSize.Value, 22f)) { homeIconSize.Value = DefaultHomeIconSize; changed = true; }
+        if (Mathf.Approximately(panelYOffset.Value, 120f)) { panelYOffset.Value = DefaultPanelYOffset; changed = true; }
+        if (Mathf.Approximately(triggerMultiplier.Value, 1.25f)) { triggerMultiplier.Value = DefaultTriggerMultiplier; changed = true; }
+        if (string.Equals(entryColor.Value?.Trim(), "#DBDBDBFF", StringComparison.OrdinalIgnoreCase))
+        {
+            entryColor.Value = DefaultEntryColor;
+            changed = true;
+        }
+        if (changed) config.Save();
     }
 
     private static ConfigEntry<float> BindRange(ConfigFile config, string section, string key, float value, float minimum, float maximum, string description) =>
@@ -176,9 +225,12 @@ internal static class PortalVisualSettings
     internal static float TitleFontSize => Clamp(titleFontSize, DefaultTitleFontSize, 12f, 96f);
     internal static float EntryFontSize => Clamp(entryFontSize, DefaultEntryFontSize, 12f, 72f);
     internal static float HintFontSize => Clamp(hintFontSize, DefaultHintFontSize, 8f, 48f);
+    internal static float BiomeFontSize => Clamp(biomeFontSize, DefaultBiomeFontSize, 8f, 48f);
+    internal static float HomeIconSize => Clamp(homeIconSize, DefaultHomeIconSize, 12f, 36f);
     internal static Color TitleColor => ParseColor(titleColor, DefaultTitleColor);
     internal static Color EntryColor => ParseColor(entryColor, DefaultEntryColor);
     internal static Color HintColor => ParseColor(hintColor, DefaultHintColor);
+    internal static Color BiomeColor => ParseColor(biomeColor, DefaultBiomeColor);
     internal static Color OutlineColor => ParseColor(outlineColor, DefaultOutlineColor);
     internal static float OutlineWidth => Clamp(outlineWidth, DefaultOutlineWidth, 0f, 1f);
     internal static float HoverScale => Clamp(hoverScale, DefaultHoverScale, 1f, 1.5f);
@@ -193,9 +245,14 @@ internal static class PortalVisualSettings
     internal static Color OrnamentColor => ParseColor(ornamentColor, DefaultOrnamentColor);
     internal static bool ShowMenuOrnament => showMenuOrnament?.Value ?? true;
     internal static bool ShowRowKnots => showRowKnots?.Value ?? true;
+    internal static float RowKnotGap => Clamp(rowKnotGap, DefaultRowKnotGap, 0f, 100f);
     internal static float FadeInSeconds => Clamp(fadeInSeconds, DefaultFadeInSeconds, .01f, 1f);
     internal static float FadeOutSeconds => Clamp(fadeOutSeconds, DefaultFadeOutSeconds, .01f, 1f);
-    internal static float TriggerMultiplier => Clamp(triggerMultiplier, DefaultTriggerMultiplier, 1f, 1.5f);
+    internal static float TriggerMultiplier => Clamp(triggerMultiplier, DefaultTriggerMultiplier, 1f, 2f);
+    internal static bool ShowBiomeSubtitle => showBiomeSubtitle?.Value ?? true;
+    internal static bool PreferHomeOnOpen => preferHomeOnOpen?.Value ?? true;
+    internal static bool ShowControlHints => showControlHints?.Value ?? true;
+    internal static KeyboardShortcut SetHomeKeyboardShortcut => setHomeKeyboardShortcut?.Value ?? new KeyboardShortcut(KeyCode.H);
 }
 
 internal static class PortalNames
@@ -209,9 +266,225 @@ internal static class PortalNames
     }
 }
 
+internal static class PortalHome
+{
+    private const string KeyPrefix = Plugin.Guid + ".home.v1.";
+
+    private static string CurrentKey()
+    {
+        var world = ZNet.instance;
+        return world == null ? null : KeyPrefix + world.GetWorldUID();
+    }
+
+    internal static bool TryGet(out ZDOID id)
+    {
+        id = ZDOID.None;
+        var player = Player.m_localPlayer;
+        var key = CurrentKey();
+        if (!player || string.IsNullOrEmpty(key) || player.m_customData == null || !player.m_customData.TryGetValue(key, out var raw)) return false;
+        var parts = raw.Split(':');
+        if (parts.Length != 2 ||
+            !long.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var user) ||
+            !uint.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)) return false;
+        id = new ZDOID(user, value);
+        return id != ZDOID.None;
+    }
+
+    internal static bool Set(ZDOID id)
+    {
+        var player = Player.m_localPlayer;
+        var key = CurrentKey();
+        if (!player || string.IsNullOrEmpty(key) || id == ZDOID.None) return false;
+        player.m_customData ??= new Dictionary<string, string>();
+        player.m_customData[key] = id.UserID.ToString(CultureInfo.InvariantCulture) + ":" + id.ID.ToString(CultureInfo.InvariantCulture);
+        return true;
+    }
+
+    internal static bool Clear()
+    {
+        var player = Player.m_localPlayer;
+        var key = CurrentKey();
+        return player && !string.IsNullOrEmpty(key) && player.m_customData != null && player.m_customData.Remove(key);
+    }
+
+    // Player.Save serializes m_customData during normal autosave and logout.
+    // Forcing SavePlayerProfile here also serializes the map and synchronizes
+    // cloud saves/achievements on the UI thread, causing a hitch on each click.
+}
+
+internal static class PortalBiomes
+{
+    internal static Heightmap.Biome Normalize(int value)
+    {
+        var biome = (Heightmap.Biome)value;
+        return Rank(biome) < 9 ? biome : Heightmap.Biome.None;
+    }
+
+    internal static int Rank(Heightmap.Biome biome) => biome switch
+    {
+        Heightmap.Biome.Meadows => 0,
+        Heightmap.Biome.BlackForest => 1,
+        Heightmap.Biome.Swamp => 2,
+        Heightmap.Biome.Mountain => 3,
+        Heightmap.Biome.Plains => 4,
+        Heightmap.Biome.Mistlands => 5,
+        Heightmap.Biome.AshLands => 6,
+        Heightmap.Biome.DeepNorth => 7,
+        Heightmap.Biome.Ocean => 8,
+        _ => 9
+    };
+
+    internal static string DisplayName(Heightmap.Biome biome) => biome switch
+    {
+        Heightmap.Biome.Meadows => "Meadows",
+        Heightmap.Biome.BlackForest => "Black Forest",
+        Heightmap.Biome.Swamp => "Swamp",
+        Heightmap.Biome.Mountain => "Mountains",
+        Heightmap.Biome.Plains => "Plains",
+        Heightmap.Biome.Mistlands => "Mistlands",
+        Heightmap.Biome.AshLands => "Ashlands",
+        Heightmap.Biome.DeepNorth => "Deep North",
+        Heightmap.Biome.Ocean => "Ocean",
+        _ => "Other"
+    };
+}
+
+internal static class PortalOrderLedger
+{
+    private static readonly Dictionary<ZDOID, long> Orders = new();
+    private static long loadedWorld;
+    private static long nextOrder = 1L;
+    private static bool initialized;
+    private static bool loadingWorld;
+
+    internal static void BeginWorldLoad() => loadingWorld = true;
+
+    internal static void EndWorldLoad(ZDOMan manager)
+    {
+        if (!loadingWorld) return;
+        loadingWorld = false;
+        if (manager != null) Ensure(manager.GetPortalList());
+    }
+
+    internal static void PrepareObservation()
+    {
+        if (loadingWorld || initialized || ZNet.instance == null || !ZNet.instance.IsServer()) return;
+        Ensure(ZDOMan.instance?.GetPortalList() ?? Enumerable.Empty<ZDO>());
+    }
+
+    internal static void Ensure(IEnumerable<ZDO> portals)
+    {
+        if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
+        LoadCurrentWorld();
+        var changed = false;
+        foreach (var id in portals.Where(z => z != null && z.IsValid()).Select(z => z.m_uid)
+                     .Distinct().OrderBy(id => unchecked((ulong)id.UserID)).ThenBy(id => id.ID))
+        {
+            if (Orders.ContainsKey(id)) continue;
+            Orders[id] = nextOrder++;
+            changed = true;
+        }
+        initialized = true;
+        if (changed) Save();
+    }
+
+    internal static long Get(ZDOID id) => Orders.TryGetValue(id, out var order) ? order : long.MaxValue;
+
+    internal static void Observe(ZDO zdo)
+    {
+        if (loadingWorld || !initialized || ZNet.instance == null || !ZNet.instance.IsServer() || zdo == null || !zdo.IsValid()) return;
+        if (ZNet.instance.GetWorldUID() != loadedWorld)
+        {
+            initialized = false;
+            return;
+        }
+        if (Orders.ContainsKey(zdo.m_uid)) return;
+        Orders[zdo.m_uid] = nextOrder++;
+        Save();
+    }
+
+    private static void LoadCurrentWorld()
+    {
+        var world = ZNet.instance.GetWorldUID();
+        if (initialized && loadedWorld == world) return;
+        loadedWorld = world;
+        nextOrder = 1L;
+        initialized = false;
+        Orders.Clear();
+        try
+        {
+            var path = CurrentPath();
+            if (!File.Exists(path)) return;
+            foreach (var line in File.ReadAllLines(path))
+            {
+                var parts = line.Split('\t');
+                if (parts.Length != 3 ||
+                    !long.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var user) ||
+                    !uint.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) ||
+                    !long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var order) || order <= 0L) continue;
+                Orders[new ZDOID(user, id)] = order;
+                nextOrder = Math.Max(nextOrder, order + 1L);
+            }
+        }
+        catch (Exception error)
+        {
+            Plugin.LogDebug($"Could not read portal creation-order ledger: {error.GetType().Name}");
+        }
+    }
+
+    private static string CurrentPath() => Path.Combine(Paths.ConfigPath, $"BetterPortals.portal-order.{loadedWorld}.tsv");
+
+    private static void Save()
+    {
+        var path = CurrentPath();
+        var temporary = path + ".tmp";
+        try
+        {
+            File.WriteAllLines(temporary, Orders.OrderBy(pair => pair.Value).Select(pair =>
+                pair.Key.UserID.ToString(CultureInfo.InvariantCulture) + "\t" +
+                pair.Key.ID.ToString(CultureInfo.InvariantCulture) + "\t" +
+                pair.Value.ToString(CultureInfo.InvariantCulture)));
+            if (File.Exists(path))
+            {
+                try { File.Replace(temporary, path, null); }
+                catch (PlatformNotSupportedException) { File.Delete(path); File.Move(temporary, path); }
+            }
+            else File.Move(temporary, path);
+        }
+        catch (Exception error)
+        {
+            Plugin.LogDebug($"Could not save portal creation-order ledger: {error.GetType().Name}");
+        }
+        finally
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); }
+            catch { }
+        }
+    }
+}
+
+[HarmonyPatch(typeof(ZDOMan), nameof(ZDOMan.Load))]
+internal static class PortalOrderLoadPatch
+{
+    private static void Prefix() => PortalOrderLedger.BeginWorldLoad();
+    private static void Postfix(ZDOMan __instance) => PortalOrderLedger.EndWorldLoad(__instance);
+    private static Exception Finalizer(Exception __exception, ZDOMan __instance)
+    {
+        PortalOrderLedger.EndWorldLoad(__instance);
+        return __exception;
+    }
+}
+
+[HarmonyPatch(typeof(ZDOMan), "AddIfPortal")]
+internal static class PortalOrderObservationPatch
+{
+    private static void Prefix() => PortalOrderLedger.PrepareObservation();
+    private static void Postfix(ZDO __0) => PortalOrderLedger.Observe(__0);
+}
+
 internal static class PortalRanges
 {
-    internal const float MaximumServerDistance = 7.5f;
+    internal const float MaximumServerDistance = 9.375f;
     internal static float TriggerMultiplier => PortalVisualSettings.TriggerMultiplier;
 
     internal static float ClientDistance(TeleportWorld portal) =>
@@ -286,8 +559,8 @@ internal static class PortalCursorPatch
     private static bool Prefix()
     {
         if (Application.isBatchMode || !PortalController.CapturesInput) return true;
-        ZCursor.LockState = ZInput.IsMouseActive() ? CursorLockMode.None : CursorLockMode.Locked;
-        ZCursor.Show();
+        if (!PortalController.WantsCursor) return true;
+        PortalController.ApplySelectorCursor(false);
         return false;
     }
 }
@@ -340,6 +613,27 @@ internal static class PortalEscapeMenuPatch
         PortalController.Instance?.DismissFromMenuInput();
         return false;
     }
+}
+
+[HarmonyPatch(typeof(Chat), "Update")]
+internal static class PortalChatInputPatch
+{
+    private static bool Prepare() => !Application.isBatchMode;
+
+    // Unity exposes Return to every Update method for the entire frame. Pause
+    // Chat while this selector owns input so one press cannot travel and open
+    // the chat field at the same time.
+    private static bool Prefix() => Application.isBatchMode || !PortalController.CapturesInput;
+}
+
+[HarmonyPatch(typeof(Chat), "InputText")]
+internal static class PortalChatOpenPatch
+{
+    private static bool Prepare() => !Application.isBatchMode;
+
+    // Blocking the actual focus/open method makes Enter suppression independent
+    // of whether Chat.Update runs before or after PortalController.Update.
+    private static bool Prefix() => Application.isBatchMode || !PortalController.CapturesInput;
 }
 
 [HarmonyPatch(typeof(TeleportWorldTrigger), "Awake")]
@@ -471,10 +765,11 @@ internal sealed class PortalExitWatcher : MonoBehaviour
 
 internal static class PortalRpc
 {
-    private const string DirectoryRequest = Plugin.Guid + ".directory.request";
-    private const string DirectoryResponse = Plugin.Guid + ".directory.response";
-    private const string TravelRequest = Plugin.Guid + ".travel.request";
-    private const string TravelResponse = Plugin.Guid + ".travel.response";
+    private const int ProtocolVersion = 2;
+    private const string DirectoryRequest = Plugin.Guid + ".v2.directory.request";
+    private const string DirectoryResponse = Plugin.Guid + ".v2.directory.response";
+    private const string TravelRequest = Plugin.Guid + ".v2.travel.request";
+    private const string TravelResponse = Plugin.Guid + ".v2.travel.response";
     private const float ServerSessionLifetime = 60f;
     private static readonly Dictionary<long, RequestWindow> Windows = new();
     private static readonly Dictionary<long, ServerSession> Sessions = new();
@@ -485,25 +780,36 @@ internal static class PortalRpc
         var rpc = ZRoutedRpc.instance;
         if (rpc == null) return false;
         if (ReferenceEquals(registeredOn, rpc)) return true;
-        rpc.Register<ZDOID, long>(DirectoryRequest, OnDirectoryRequest);
+        rpc.Register<ZPackage>(DirectoryRequest, OnDirectoryRequest);
         rpc.Register<ZPackage>(DirectoryResponse, OnDirectoryResponse);
-        rpc.Register<ZDOID, ZDOID, long>(TravelRequest, OnTravelRequest);
+        rpc.Register<ZPackage>(TravelRequest, OnTravelRequest);
         rpc.Register<ZPackage>(TravelResponse, OnTravelResponse);
         registeredOn = rpc;
         return true;
     }
 
-    internal static bool AskDirectory(ZDOID source, long nonce)
+    internal static bool AskDirectory(ZDOID source, ZDOID savedHome, long nonce)
     {
         if (!Register() || !TryServerId(out var server)) return false;
-        ZRoutedRpc.instance.InvokeRoutedRPC(server, DirectoryRequest, source, nonce);
+        var package = new ZPackage();
+        package.Write(ProtocolVersion);
+        package.Write(source);
+        package.Write(savedHome != ZDOID.None);
+        if (savedHome != ZDOID.None) package.Write(savedHome);
+        package.Write(nonce);
+        ZRoutedRpc.instance.InvokeRoutedRPC(server, DirectoryRequest, package);
         return true;
     }
 
     internal static bool AskTravel(ZDOID source, ZDOID destination, long nonce)
     {
         if (!Register() || !TryServerId(out var server)) return false;
-        ZRoutedRpc.instance.InvokeRoutedRPC(server, TravelRequest, source, destination, nonce);
+        var package = new ZPackage();
+        package.Write(ProtocolVersion);
+        package.Write(source);
+        package.Write(destination);
+        package.Write(nonce);
+        ZRoutedRpc.instance.InvokeRoutedRPC(server, TravelRequest, package);
         return true;
     }
 
@@ -530,7 +836,15 @@ internal static class PortalRpc
 
     private static bool NearSource(long sender, ZDO source)
     {
-        var peer = ZNet.instance?.GetPeer(sender);
+        var net = ZNet.instance;
+        if (net == null || source == null) return false;
+        if (net.IsServer() && sender == ZNet.GetUID())
+        {
+            var local = Player.m_localPlayer;
+            return local && Vector3.Distance(local.transform.position, source.GetPosition()) <= PortalRanges.MaximumServerDistance;
+        }
+
+        var peer = net.GetPeer(sender);
         return peer != null && Vector3.Distance(peer.m_refPos, source.GetPosition()) <= PortalRanges.MaximumServerDistance;
     }
 
@@ -546,47 +860,152 @@ internal static class PortalRpc
         return true;
     }
 
-    private static void OnDirectoryRequest(long sender, ZDOID sourceId, long nonce)
+    private static void OnDirectoryRequest(long sender, ZPackage request)
     {
-        if (!ZNet.instance.IsServer() || !RateAllowed(sender) || !TryPortal(sourceId, out var source) || !NearSource(sender, source)) return;
-        Sessions[sender] = new ServerSession(sourceId, nonce, Time.realtimeSinceStartup + ServerSessionLifetime);
-        var portals = ZDOMan.instance.GetPortalList()
-            .Where(z => z != null && z.IsValid() && z.m_uid != sourceId)
-            .Select(z => new PortalInfo(z.m_uid, PortalNames.Sanitize(z.GetString("tag"))))
-            .Where(p => !string.IsNullOrWhiteSpace(p.Name)).OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).Take(512).ToList();
-        var package = new ZPackage();
-        package.Write(nonce); package.Write(portals.Count);
-        foreach (var p in portals) { package.Write(p.Id); package.Write(p.Name); }
-        ZRoutedRpc.instance.InvokeRoutedRPC(sender, DirectoryResponse, package);
+        if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
+        try
+        {
+            if (request.ReadInt() != ProtocolVersion) return;
+            var sourceId = request.ReadZDOID();
+            var savedHome = request.ReadBool() ? request.ReadZDOID() : ZDOID.None;
+            var nonce = request.ReadLong();
+            if (!RateAllowed(sender) || !TryPortal(sourceId, out var source) || !NearSource(sender, source)) return;
+
+            var generator = WorldGenerator.instance;
+            var portalZdos = ZDOMan.instance.GetPortalList().Where(z => z != null && z.IsValid()).ToList();
+            PortalOrderLedger.Ensure(portalZdos);
+            var allPortals = portalZdos.Where(z => z.m_uid != sourceId)
+                .Select(z => new PortalInfo(
+                    z.m_uid,
+                    PortalNames.Sanitize(z.GetString("tag")),
+                    generator != null ? generator.GetBiome(z.GetPosition()) : Heightmap.Biome.None,
+                    PortalOrderLedger.Get(z.m_uid)))
+                .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+                .OrderBy(p => PortalBiomes.Rank(p.Biome))
+                .ThenBy(p => p.CreationOrder)
+                .ThenBy(p => unchecked((ulong)p.Id.UserID))
+                .ThenBy(p => p.Id.ID)
+                .ToList();
+
+            var homeValid = savedHome != ZDOID.None && portalZdos.Any(zdo => zdo.m_uid == savedHome &&
+                !string.IsNullOrWhiteSpace(PortalNames.Sanitize(zdo.GetString("tag"))));
+            var portals = allPortals.Take(512).ToList();
+            if (homeValid && savedHome != sourceId && !portals.Any(portal => portal.Id == savedHome))
+            {
+                portals[portals.Count - 1] = allPortals.First(portal => portal.Id == savedHome);
+                portals = portals.OrderBy(p => PortalBiomes.Rank(p.Biome))
+                    .ThenBy(p => p.CreationOrder)
+                    .ThenBy(p => unchecked((ulong)p.Id.UserID))
+                    .ThenBy(p => p.Id.ID).ToList();
+            }
+
+            Sessions[sender] = new ServerSession(sourceId, nonce, Time.realtimeSinceStartup + ServerSessionLifetime,
+                portals.Select(portal => portal.Id));
+            var response = new ZPackage();
+            response.Write(ProtocolVersion);
+            response.Write(nonce);
+            response.Write(homeValid);
+            response.Write(portals.Count);
+            foreach (var portal in portals)
+            {
+                response.Write(portal.Id);
+                response.Write(portal.Name);
+                response.Write((int)portal.Biome);
+                response.Write(portal.CreationOrder);
+            }
+            ZRoutedRpc.instance.InvokeRoutedRPC(sender, DirectoryResponse, response);
+        }
+        catch (Exception error)
+        {
+            Plugin.LogDebug($"Rejected malformed portal directory request: {error.GetType().Name}");
+        }
     }
 
     private static void OnDirectoryResponse(long sender, ZPackage package)
     {
         if (!TryServerId(out var server) || sender != server) return;
-        var nonce = package.ReadLong();
-        var count = Mathf.Clamp(package.ReadInt(), 0, 512);
-        var list = new List<PortalInfo>(count);
-        for (var i = 0; i < count; i++) list.Add(new PortalInfo(package.ReadZDOID(), PortalNames.Sanitize(package.ReadString())));
-        PortalController.Instance.Show(nonce, list);
+        try
+        {
+            if (package.ReadInt() != ProtocolVersion) return;
+            var nonce = package.ReadLong();
+            var homeValid = package.ReadBool();
+            var count = package.ReadInt();
+            if (count < 0 || count > 512) throw new InvalidDataException("Portal directory count was outside the protocol bounds.");
+            var list = new List<PortalInfo>(count);
+            for (var i = 0; i < count; i++)
+            {
+                var id = package.ReadZDOID();
+                var name = PortalNames.Sanitize(package.ReadString());
+                var biome = PortalBiomes.Normalize(package.ReadInt());
+                var creationOrder = package.ReadLong();
+                if (id == ZDOID.None || string.IsNullOrWhiteSpace(name) || creationOrder <= 0L)
+                    throw new InvalidDataException("Portal directory record was invalid.");
+                list.Add(new PortalInfo(id, name, biome, creationOrder));
+            }
+            PortalController.Instance?.Show(nonce, homeValid, list);
+        }
+        catch (Exception error)
+        {
+            Plugin.LogDebug($"Rejected malformed portal directory response: {error.GetType().Name}");
+        }
     }
 
-    private static void OnTravelRequest(long sender, ZDOID sourceId, ZDOID destinationId, long nonce)
+    private static void OnTravelRequest(long sender, ZPackage request)
     {
-        var response = new ZPackage(); response.Write(nonce);
-        var validSession = Sessions.TryGetValue(sender, out var session) && session.Source == sourceId && session.Nonce == nonce && session.Expires >= Time.realtimeSinceStartup;
-        Sessions.Remove(sender);
-        if (!ZNet.instance.IsServer() || !RateAllowed(sender) || !validSession || !TryPortal(sourceId, out var source) || !NearSource(sender, source) ||
-            !TryPortal(destinationId, out var destination) || destinationId == sourceId || string.IsNullOrWhiteSpace(destination.GetString("tag")))
-        { response.Write(false); ZRoutedRpc.instance.InvokeRoutedRPC(sender, TravelResponse, response); return; }
-        response.Write(true); response.Write(destination.GetPosition()); response.Write(destination.GetRotation());
-        ZRoutedRpc.instance.InvokeRoutedRPC(sender, TravelResponse, response);
+        if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
+        try
+        {
+            if (request.ReadInt() != ProtocolVersion) return;
+            var sourceId = request.ReadZDOID();
+            var destinationId = request.ReadZDOID();
+            var nonce = request.ReadLong();
+            var validSession = Sessions.TryGetValue(sender, out var session) && session.Source == sourceId &&
+                session.Nonce == nonce && session.Expires >= Time.realtimeSinceStartup && session.Destinations.Contains(destinationId);
+            Sessions.Remove(sender);
+            if (!RateAllowed(sender) || !validSession || !TryPortal(sourceId, out var source) || !NearSource(sender, source) ||
+                !TryPortal(destinationId, out var destination) || destinationId == sourceId ||
+                string.IsNullOrWhiteSpace(PortalNames.Sanitize(destination.GetString("tag"))))
+            {
+                SendTravelResponse(sender, nonce, false, null);
+                return;
+            }
+            SendTravelResponse(sender, nonce, true, destination);
+        }
+        catch (Exception error)
+        {
+            Plugin.LogDebug($"Rejected malformed portal travel request: {error.GetType().Name}");
+        }
     }
 
     private static void OnTravelResponse(long sender, ZPackage package)
     {
         if (!TryServerId(out var server) || sender != server) return;
-        var nonce = package.ReadLong(); var approved = package.ReadBool();
-        PortalController.Instance.Complete(nonce, approved, approved ? package.ReadVector3() : default, approved ? package.ReadQuaternion() : default);
+        try
+        {
+            if (package.ReadInt() != ProtocolVersion) return;
+            var nonce = package.ReadLong();
+            var approved = package.ReadBool();
+            PortalController.Instance?.Complete(nonce, approved, approved ? package.ReadVector3() : default,
+                approved ? package.ReadQuaternion() : default);
+        }
+        catch (Exception error)
+        {
+            Plugin.LogDebug($"Rejected malformed portal travel response: {error.GetType().Name}");
+        }
+    }
+
+    private static void SendTravelResponse(long sender, long nonce, bool approved, ZDO destination)
+    {
+        var response = new ZPackage();
+        response.Write(ProtocolVersion);
+        response.Write(nonce);
+        response.Write(approved);
+        if (approved && destination != null)
+        {
+            response.Write(destination.GetPosition());
+            response.Write(destination.GetRotation());
+        }
+        ZRoutedRpc.instance.InvokeRoutedRPC(sender, TravelResponse, response);
     }
 
     private readonly struct RequestWindow
@@ -600,7 +1019,14 @@ internal static class PortalRpc
         internal readonly ZDOID Source;
         internal readonly long Nonce;
         internal readonly float Expires;
-        internal ServerSession(ZDOID source, long nonce, float expires) { Source = source; Nonce = nonce; Expires = expires; }
+        internal readonly HashSet<ZDOID> Destinations;
+        internal ServerSession(ZDOID source, long nonce, float expires, IEnumerable<ZDOID> destinations)
+        {
+            Source = source;
+            Nonce = nonce;
+            Expires = expires;
+            Destinations = new HashSet<ZDOID>(destinations);
+        }
     }
 }
 
@@ -608,7 +1034,15 @@ internal readonly struct PortalInfo
 {
     internal readonly ZDOID Id;
     internal readonly string Name;
-    internal PortalInfo(ZDOID id, string name) { Id = id; Name = name; }
+    internal readonly Heightmap.Biome Biome;
+    internal readonly long CreationOrder;
+    internal PortalInfo(ZDOID id, string name, Heightmap.Biome biome, long creationOrder)
+    {
+        Id = id;
+        Name = name;
+        Biome = PortalBiomes.Normalize((int)biome);
+        CreationOrder = Math.Max(1L, creationOrder);
+    }
 }
 
 internal sealed class PortalController : MonoBehaviour
@@ -623,6 +1057,8 @@ internal sealed class PortalController : MonoBehaviour
     internal static PortalController Instance;
     internal static bool BypassOnce;
     internal static bool CapturesInput => Instance != null && ((Instance.panel && Instance.panel.activeSelf) || Instance.travelPending);
+    internal static bool WantsCursor => Instance != null && Instance.panel && Instance.panel.activeSelf &&
+        Instance.fadeTarget > 0f && !Instance.travelPending;
 
     private ZDOID source;
     private TeleportWorld sourcePortal;
@@ -637,7 +1073,11 @@ internal sealed class PortalController : MonoBehaviour
     private LayoutElement scrollLayout;
     private ScrollRect destinationScroll;
     private Button firstSelectable;
+    private Button homeSelectable;
     private bool? previousMouseInput;
+    private Vector3 openingMousePosition;
+    private bool mouseChoiceArmed;
+    private int cursorCenterFrames;
     private float fadeTarget;
     private bool resetAfterFade;
     private bool travelPending;
@@ -662,13 +1102,21 @@ internal sealed class PortalController : MonoBehaviour
     private float[] menuOrnamentBaseAlphas = Array.Empty<float>();
     private bool visualsDirty;
     private readonly List<GameObject> rows = new();
+    private readonly List<PortalEntryHover> portalRows = new();
+    private readonly List<PortalInfo> currentPortals = new();
     private static TMP_FontAsset nativeFont;
     private static Material nativeFontMaterial;
+    private static Sprite nativeHomeSprite;
+    private static int nativeHomeSpriteSearchFrame = -1;
+    private static bool cursorWarpPrepared;
+    private static System.Reflection.PropertyInfo inputMouseCurrentProperty;
+    private static System.Reflection.MethodInfo inputMouseWarpMethod;
 
     private void Awake()
     {
         Instance = this;
         visualsDirty = true;
+        PrepareCursorWarp();
     }
 
     internal void MarkVisualsDirty() => visualsDirty = true;
@@ -713,7 +1161,8 @@ internal sealed class PortalController : MonoBehaviour
         directoryReady = false;
         requestStarted = Time.realtimeSinceStartup;
         sessionDeadline = requestStarted + SessionLifetime - 2f;
-        if (!PortalRpc.AskDirectory(source, nonce))
+        PortalHome.TryGet(out var savedHome);
+        if (!PortalRpc.AskDirectory(source, savedHome, nonce))
         {
             sourcePortal = null;
             source = ZDOID.None;
@@ -771,7 +1220,8 @@ internal sealed class PortalController : MonoBehaviour
 
         if (directoryReady) return;
         nextDeferredAttempt = now + DirectoryResponseRetryInterval;
-        if (!PortalRpc.AskDirectory(source, nonce)) nextDeferredAttempt = now + FirstEntryRetryInterval;
+        PortalHome.TryGet(out var savedHome);
+        if (!PortalRpc.AskDirectory(source, savedHome, nonce)) nextDeferredAttempt = now + FirstEntryRetryInterval;
     }
 
     private void ClearDeferredBegin()
@@ -783,7 +1233,7 @@ internal sealed class PortalController : MonoBehaviour
         nextDeferredAttempt = 0f;
     }
 
-    internal void Show(long responseNonce, List<PortalInfo> portals)
+    internal void Show(long responseNonce, bool homeValid, List<PortalInfo> portals)
     {
         if (responseNonce != nonce || travelPending || directoryReady) return;
         if (!SourceIsUsable()) { ResetSession(0f); return; }
@@ -796,20 +1246,37 @@ internal sealed class PortalController : MonoBehaviour
         }
         EnsureUi();
         foreach (var row in rows) Destroy(row); rows.Clear();
+        portalRows.Clear();
+        currentPortals.Clear();
         firstSelectable = null;
-        var duplicateTotals = portals.GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+        homeSelectable = null;
+        currentPortals.AddRange(portals.OrderBy(p => PortalBiomes.Rank(p.Biome))
+            .ThenBy(p => p.CreationOrder)
+            .ThenBy(p => unchecked((ulong)p.Id.UserID))
+            .ThenBy(p => p.Id.ID));
+        var duplicateTotals = currentPortals.GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
         var duplicateIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var portal in portals)
+        var hadSavedHome = PortalHome.TryGet(out var home);
+        if (hadSavedHome && (!homeValid || (home != source && !currentPortals.Any(portal => portal.Id == home))))
+        {
+            PortalHome.Clear();
+            home = ZDOID.None;
+            ShowStatus("Home portal unavailable — choose a new Home");
+        }
+        foreach (var portal in currentPortals)
         {
             duplicateIndex.TryGetValue(portal.Name, out var index); duplicateIndex[portal.Name] = ++index;
             var label = duplicateTotals[portal.Name] > 1 ? $"{portal.Name}  ({index}/{duplicateTotals[portal.Name]})" : portal.Name;
-            var destination = portal.Id;
-            var button = AddRow(label, () => SelectDestination(destination));
+            var destination = portal;
+            var button = AddRow(label, PortalBiomes.DisplayName(portal.Biome), portal.Id,
+                () => ActivateDestination(destination.Id), () => ToggleHome(destination), portal.Id == home);
             if (!firstSelectable) firstSelectable = button;
+            if (portal.Id == home) homeSelectable = button;
         }
-        if (portals.Count == 0) AddRow("No named destinations found", null);
+        if (currentPortals.Count == 0) AddRow("No named destinations found", string.Empty, ZDOID.None, null, null, false);
 
         ConfigureRowNavigation();
+        UpdateHintText();
         ApplyVisualSettings();
         canvasGroup.alpha = 0f;
         canvasGroup.interactable = true;
@@ -817,18 +1284,22 @@ internal sealed class PortalController : MonoBehaviour
         fadeTarget = 1f;
         resetAfterFade = false;
         panel.SetActive(true);
-        ZCursor.LockState = ZInput.IsMouseActive() ? CursorLockMode.None : CursorLockMode.Locked;
-        ZCursor.Show();
         LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)panel.transform);
         previousMouseInput = null;
-        SynchronizeInputSelection();
+        mouseChoiceArmed = false;
+        SynchronizeInputSelection(true);
+        if (homeSelectable && PortalVisualSettings.PreferHomeOnOpen) ScrollIntoView(homeSelectable.gameObject);
     }
 
     internal void Complete(long responseNonce, bool approved, Vector3 position, Quaternion rotation)
     {
         if (responseNonce != nonce) return;
         travelPending = false;
-        if (!approved || Player.m_localPlayer == null) { RequestClose(true); return; }
+        if (!approved || Player.m_localPlayer == null)
+        {
+            RequestClose(true);
+            return;
+        }
         pendingTeleport = true;
         pendingPosition = position;
         pendingRotation = rotation;
@@ -850,13 +1321,20 @@ internal sealed class PortalController : MonoBehaviour
 
     private void Update()
     {
+        // Build the static selector shell while the main menu is already loaded,
+        // keeping native asset discovery out of the first portal-entry frame.
+        if (!panel && Menu.instance && Menu.instance.m_continueButton) EnsureUi();
         AdvanceDeferredBegin();
         if (visualsDirty) ApplyVisualSettings();
         if (nonce != 0 && !SourceIsUsable()) RequestClose(true);
         if (panel && panel.activeSelf)
         {
-            if (Input.GetKeyDown(KeyCode.Escape) || ZInput.GetButtonDown("JoyButtonB") || AnotherModalIsVisible()) RequestClose(true);
             SynchronizeInputSelection();
+            AdvanceCursorCentering();
+            ArmMouseChoiceAfterMovement();
+            if (PortalVisualSettings.SetHomeKeyboardShortcut.IsDown() || ZInput.GetButtonDown("JoyButtonX")) ToggleSelectedHome();
+            else if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || ZInput.GetButtonDown("JoyButtonA")) ConfirmSelected();
+            else if (Input.GetKeyDown(KeyCode.Escape) || ZInput.GetButtonDown("JoyButtonB") || AnotherModalIsVisible()) RequestClose(true);
             KeepControllerSelectionVisible();
             AdvanceFade();
         }
@@ -875,6 +1353,15 @@ internal sealed class PortalController : MonoBehaviour
         var canvas = canvasObject.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         canvas.overrideSorting = true;
+        var canvasRect = canvasObject.GetComponent<RectTransform>();
+        if (canvasRect)
+        {
+            canvasRect.anchorMin = Vector2.zero;
+            canvasRect.anchorMax = Vector2.one;
+            canvasRect.pivot = new Vector2(.5f, .5f);
+            canvasRect.anchoredPosition = Vector2.zero;
+            canvasRect.sizeDelta = Vector2.zero;
+        }
         var nativeCanvas = Menu.instance?.GetComponentInParent<Canvas>();
         canvas.sortingOrder = nativeCanvas ? nativeCanvas.sortingOrder + 1 : 1701;
         ConfigureScaler(canvasObject.GetComponent<CanvasScaler>());
@@ -925,9 +1412,9 @@ internal sealed class PortalController : MonoBehaviour
         contentLayout.spacing = 2f;
         contentLayout.childAlignment = TextAnchor.UpperCenter;
         contentLayout.childControlHeight = true;
-        contentLayout.childControlWidth = false;
+        contentLayout.childControlWidth = true;
         contentLayout.childForceExpandHeight = false;
-        contentLayout.childForceExpandWidth = false;
+        contentLayout.childForceExpandWidth = true;
         contentObject.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
         destinationScroll = scrollObject.GetComponent<ScrollRect>();
         destinationScroll.viewport = (RectTransform)viewport.transform;
@@ -972,6 +1459,7 @@ internal sealed class PortalController : MonoBehaviour
             if (!row) continue;
             row.GetComponent<PortalEntryHover>()?.ApplyVisualSettings();
         }
+        UpdateHintText();
 
         if (darkBackdrop)
         {
@@ -997,10 +1485,11 @@ internal sealed class PortalController : MonoBehaviour
     private void UpdateListHeight()
     {
         if (!scrollLayout) return;
-        var count = Mathf.Max(1, rows.Count);
-        var rowHeight = PortalVisualSettings.RowHeight;
-        var contentHeight = count * rowHeight + Mathf.Max(0, count - 1) * PortalVisualSettings.RowSpacing;
-        var minimum = Mathf.Min(PortalVisualSettings.MaxListHeight, Mathf.Max(54f, rowHeight));
+        var visibleRows = rows.Where(row => row && row.activeSelf).ToList();
+        var count = Mathf.Max(1, visibleRows.Count);
+        var contentHeight = visibleRows.Sum(row => row.GetComponent<LayoutElement>()?.preferredHeight ?? PortalVisualSettings.RowHeight) +
+            Mathf.Max(0, count - 1) * PortalVisualSettings.RowSpacing;
+        var minimum = Mathf.Min(PortalVisualSettings.MaxListHeight, Mathf.Max(54f, PortalVisualSettings.RowHeight));
         scrollLayout.preferredHeight = Mathf.Clamp(contentHeight, minimum, PortalVisualSettings.MaxListHeight);
     }
 
@@ -1027,30 +1516,62 @@ internal sealed class PortalController : MonoBehaviour
         }
     }
 
-    private void SynchronizeInputSelection()
+    private void SynchronizeInputSelection(bool centerMouse = false)
     {
         var eventSystem = EventSystem.current;
         if (!eventSystem) return;
         var mouseInput = ZInput.IsMouseActive();
         if (previousMouseInput.HasValue && previousMouseInput.Value == mouseInput) return;
+        var changedToMouse = previousMouseInput.HasValue && !previousMouseInput.Value && mouseInput;
         previousMouseInput = mouseInput;
 
         var selected = eventSystem.currentSelectedGameObject;
         if (mouseInput)
         {
+            ApplySelectorCursor(centerMouse || changedToMouse);
+            if (centerMouse || changedToMouse)
+            {
+                cursorCenterFrames = 1;
+                openingMousePosition = new Vector3(Screen.width * .5f, Screen.height * .5f, 0f);
+                mouseChoiceArmed = false;
+            }
             if (selected && panel && selected.transform.IsChildOf(panel.transform)) eventSystem.SetSelectedGameObject(null);
         }
         else if (firstSelectable)
         {
-            eventSystem.SetSelectedGameObject(firstSelectable.gameObject);
+            ApplySelectorCursor(false);
+            var preferred = PortalVisualSettings.PreferHomeOnOpen && homeSelectable ? homeSelectable : firstSelectable;
+            eventSystem.SetSelectedGameObject(preferred.gameObject);
+            ScrollIntoView(preferred.gameObject);
         }
+        UpdateHintText();
+    }
+
+    private void AdvanceCursorCentering()
+    {
+        if (cursorCenterFrames <= 0 || !ZInput.IsMouseActive()) return;
+        ApplySelectorCursor(true);
+        cursorCenterFrames--;
+        if (cursorCenterFrames == 0) openingMousePosition = Input.mousePosition;
+    }
+
+    private void ArmMouseChoiceAfterMovement()
+    {
+        if (mouseChoiceArmed || cursorCenterFrames > 0 || !ZInput.IsMouseActive()) return;
+        if ((Input.mousePosition - openingMousePosition).sqrMagnitude > 9f) mouseChoiceArmed = true;
     }
 
     private void KeepControllerSelectionVisible()
     {
         if (ZInput.IsMouseActive() || !destinationScroll || !destinationScroll.viewport || !destinationScroll.content) return;
         var selected = EventSystem.current?.currentSelectedGameObject;
-        if (!selected || !selected.transform.IsChildOf(content)) return;
+        ScrollIntoView(selected);
+    }
+
+    private void ScrollIntoView(GameObject selected)
+    {
+        if (!selected || !destinationScroll || !destinationScroll.viewport || !destinationScroll.content ||
+            !selected.transform.IsChildOf(content)) return;
 
         Canvas.ForceUpdateCanvases();
         var bounds = RectTransformUtility.CalculateRelativeRectTransformBounds(destinationScroll.viewport, selected.transform);
@@ -1065,14 +1586,152 @@ internal sealed class PortalController : MonoBehaviour
         destinationScroll.content.anchoredPosition = position;
     }
 
-    private Button AddRow(string label, Action action)
+    private void ToggleHome(PortalInfo portal)
+    {
+        var clearing = PortalHome.TryGet(out var current) && current == portal.Id;
+        var changed = clearing ? PortalHome.Clear() : PortalHome.Set(portal.Id);
+        if (!changed) return;
+        foreach (var row in portalRows) row.SetHome(!clearing && row.PortalId == portal.Id);
+        homeSelectable = clearing ? null : portalRows.FirstOrDefault(row => row.PortalId == portal.Id)?.GetComponent<Button>();
+        UpdateHintText();
+        Plugin.LogDebug(clearing ? "Home portal cleared." : $"Home portal set to {portal.Name}.");
+    }
+
+    private PortalEntryHover SelectedPortalRow()
+    {
+        var selected = EventSystem.current?.currentSelectedGameObject;
+        var selectedRow = selected?.GetComponent<PortalEntryHover>();
+        return selectedRow ?? portalRows.FirstOrDefault(row => row.PointerInside) ??
+            (PortalVisualSettings.PreferHomeOnOpen && homeSelectable ? homeSelectable.GetComponent<PortalEntryHover>() :
+                firstSelectable?.GetComponent<PortalEntryHover>());
+    }
+
+    private void ToggleSelectedHome()
+    {
+        SelectedPortalRow()?.SetAsHome();
+    }
+
+    private void ConfirmSelected()
+    {
+        if (travelPending) return;
+        var row = ZInput.IsMouseActive() && !mouseChoiceArmed && homeSelectable
+            ? homeSelectable.GetComponent<PortalEntryHover>()
+            : SelectedPortalRow();
+        row?.Activate();
+    }
+
+    private void ActivateDestination(ZDOID destination)
+    {
+        SelectDestination(destination);
+    }
+
+    private void UpdateHintText()
+    {
+        if (!hintText) return;
+        hintText.gameObject.SetActive(PortalVisualSettings.ShowControlHints);
+        if (!PortalVisualSettings.ShowControlHints) return;
+        hintText.text = ZInput.IsMouseActive()
+            ? $"Enter Travel     {PortalVisualSettings.SetHomeKeyboardShortcut} Set Home     Esc Close"
+            : "A Travel     X Set Home     B Close";
+    }
+
+    private static void ShowStatus(string message)
+    {
+        var hud = MessageHud.instance;
+        if (hud) hud.ShowMessage(MessageHud.MessageType.TopLeft, message, 0, ResolveHomeSprite(), false, false);
+    }
+
+    internal static void ApplySelectorCursor(bool center)
+    {
+        if (Application.isBatchMode) return;
+        if (!ZInput.IsMouseActive())
+        {
+            if (ZCursor.IsVisible) ZCursor.Hide();
+            ZCursor.LockState = CursorLockMode.Locked;
+            return;
+        }
+
+        ZCursor.LockState = CursorLockMode.None;
+        if (!ZCursor.IsVisible) ZCursor.Show();
+        if (center) CenterPointer();
+    }
+
+    private static void PrepareCursorWarp()
+    {
+        if (cursorWarpPrepared) return;
+        cursorWarpPrepared = true;
+        try
+        {
+            var mouseType = AccessTools.TypeByName("UnityEngine.InputSystem.Mouse");
+            if (mouseType == null) return;
+            inputMouseCurrentProperty = AccessTools.Property(mouseType, "current");
+            inputMouseWarpMethod = AccessTools.Method(mouseType, "WarpCursorPosition", new[] { typeof(Vector2) });
+        }
+        catch (Exception error)
+        {
+            Plugin.LogDebug($"Input-system cursor warp preparation failed: {error.GetType().Name}");
+        }
+    }
+
+    private static void CenterPointer()
+    {
+        var center = new Vector2(Screen.width * .5f, Screen.height * .5f);
+        try
+        {
+            PrepareCursorWarp();
+            var current = inputMouseCurrentProperty?.GetValue(null, null);
+            if (current != null && inputMouseWarpMethod != null)
+            {
+                inputMouseWarpMethod.Invoke(current, new object[] { center });
+                return;
+            }
+        }
+        catch (Exception error)
+        {
+            Plugin.LogDebug($"Input-system cursor centering fell back to lock/unlock: {error.GetType().Name}");
+        }
+
+        // Locking briefly is Unity's platform-neutral legacy cursor warp.
+        ZCursor.LockState = CursorLockMode.Locked;
+        ZCursor.LockState = CursorLockMode.None;
+        if (!ZCursor.IsVisible) ZCursor.Show();
+    }
+
+    private static void ReleaseSelectorCursor()
+    {
+        if (Application.isBatchMode) return;
+        if (ZCursor.IsVisible) ZCursor.Hide();
+        ZCursor.LockState = CursorLockMode.Locked;
+        GameCamera.instance?.UpdateMouseCapture();
+    }
+
+    internal static Sprite ResolveHomeSprite()
+    {
+        if (nativeHomeSprite) return nativeHomeSprite;
+        if (nativeHomeSpriteSearchFrame == Time.frameCount) return null;
+        nativeHomeSpriteSearchFrame = Time.frameCount;
+        foreach (var button in Resources.FindObjectsOfTypeAll<BuildUiPieceButton>())
+        {
+            if (!button) continue;
+            var favorite = Traverse.Create(button).Field<Image>("m_favoriteStar").Value;
+            if (favorite && favorite.sprite)
+            {
+                nativeHomeSprite = favorite.sprite;
+                return nativeHomeSprite;
+            }
+        }
+        return null;
+    }
+
+    private Button AddRow(string label, string biome, ZDOID portalId, Action action, Action setHome, bool isHome)
     {
         var template = Menu.instance?.m_continueButton;
-        if (!template) return AddFallbackRow(label, action);
+        if (!template) return AddFallbackRow(label, biome, portalId, action, setHome, isHome);
 
         var row = UnityEngine.Object.Instantiate(template.gameObject, content, false);
         row.name = label;
         row.SetActive(false);
+        NormalizeRowRect(row);
         var animator = row.GetComponent<Animator>();
         if (animator) animator.enabled = false;
         var button = row.GetComponent<Button>();
@@ -1087,48 +1746,172 @@ internal sealed class PortalController : MonoBehaviour
         button.targetGraphic = background;
         var rowLayout = row.GetComponent<LayoutElement>() ?? row.AddComponent<LayoutElement>();
         rowLayout.preferredHeight = PortalVisualSettings.RowHeight;
+        rowLayout.minWidth = 0f;
+        rowLayout.preferredWidth = -1f;
+        rowLayout.flexibleWidth = 1f;
 
-        var text = row.GetComponentInChildren<TMP_Text>(true);
-        if (!text) { Destroy(row); return AddFallbackRow(label, action); }
-        text.text = label;
-        text.raycastTarget = false;
-        text.transform.localScale = Vector3.one;
-        ApplyTextAppearance(text, PortalVisualSettings.EntryFontSize,
-            action == null ? new Color(.55f, .55f, .53f, 1f) : PortalVisualSettings.EntryColor);
-        var knots = row.GetComponentsInChildren<Image>(true)
-            .Where(image => image && image != background && image.name.IndexOf("Knot", StringComparison.OrdinalIgnoreCase) >= 0)
+        var nativeText = row.GetComponentInChildren<TMP_Text>(true);
+        if (!nativeText) { Destroy(row); return AddFallbackRow(label, biome, portalId, action, setHome, isHome); }
+        nativeText.gameObject.SetActive(false);
+        var labelRoot = AddLabelGroup(row.transform, label, biome, out var text, out var biomeText, out var homeIcons, out var homeFallbacks);
+        var nativeKnots = row.GetComponentsInChildren<Image>(true)
+            .Where(image => image && image != background && !homeIcons.Contains(image) && image.name.IndexOf("Knot", StringComparison.OrdinalIgnoreCase) >= 0)
             .ToArray();
-        var knotColor = PortalVisualSettings.OrnamentColor;
-        foreach (var knot in knots)
-        {
-            knot.color = new Color(knotColor.r, knotColor.g, knotColor.b, 0f);
-            knot.raycastTarget = false;
-        }
+        var knots = CreateNormalizedRowKnots(row.transform, nativeKnots);
         var hover = row.GetComponent<PortalEntryHover>() ?? row.AddComponent<PortalEntryHover>();
-        hover.Initialize(text, background, knots, action != null);
+        hover.Initialize(text, biomeText, labelRoot, background, knots, homeIcons, homeFallbacks, portalId, action != null, setHome, isHome);
         rows.Add(row);
+        if (portalId != ZDOID.None) portalRows.Add(hover);
         row.SetActive(true);
         return button;
     }
 
-    private Button AddFallbackRow(string label, Action action)
+    private Button AddFallbackRow(string label, string biome, ZDOID portalId, Action action, Action setHome, bool isHome)
     {
         var row = new GameObject(label, typeof(RectTransform), typeof(Image), typeof(Button), typeof(LayoutElement), typeof(PortalEntryHover));
         row.transform.SetParent(content, false);
-        row.GetComponent<LayoutElement>().preferredHeight = PortalVisualSettings.RowHeight;
+        NormalizeRowRect(row);
+        var rowLayout = row.GetComponent<LayoutElement>();
+        rowLayout.preferredHeight = PortalVisualSettings.RowHeight;
+        rowLayout.minWidth = 0f;
+        rowLayout.preferredWidth = -1f;
+        rowLayout.flexibleWidth = 1f;
         var background = row.GetComponent<Image>();
         background.color = Color.clear;
         background.raycastTarget = true;
-        var textColor = action == null ? new Color(.55f, .55f, .53f, 1f) : PortalVisualSettings.EntryColor;
-        var text = AddText(row.transform, label, PortalVisualSettings.EntryFontSize, FontStyles.Normal, textColor);
-        Stretch((RectTransform)text.transform);
+        var labelRoot = AddLabelGroup(row.transform, label, biome, out var text, out var biomeText, out var homeIcons, out var homeFallbacks);
         var button = row.GetComponent<Button>();
         button.transition = Selectable.Transition.None;
         button.interactable = action != null;
         if (action != null) button.onClick.AddListener(() => action());
-        row.GetComponent<PortalEntryHover>().Initialize(text, background, Array.Empty<Image>(), action != null);
+        var hover = row.GetComponent<PortalEntryHover>();
+        hover.Initialize(text, biomeText, labelRoot, background, Array.Empty<Image>(), homeIcons, homeFallbacks, portalId, action != null, setHome, isHome);
         rows.Add(row);
+        if (portalId != ZDOID.None) portalRows.Add(hover);
         return button;
+    }
+
+    private static Transform AddLabelGroup(Transform parent, string label, string biome, out TMP_Text nameText, out TMP_Text biomeText,
+        out Image[] homeIcons, out TMP_Text[] homeFallbacks)
+    {
+        var group = new GameObject("BetterPortals Label Group", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(ContentSizeFitter), typeof(LayoutElement));
+        group.transform.SetParent(parent, false);
+        group.GetComponent<LayoutElement>().ignoreLayout = true;
+        var rect = (RectTransform)group.transform;
+        rect.anchorMin = rect.anchorMax = new Vector2(.5f, .5f);
+        rect.pivot = new Vector2(.5f, .5f);
+        rect.anchoredPosition = Vector2.zero;
+        var layout = group.GetComponent<HorizontalLayoutGroup>();
+        layout.spacing = 8f;
+        layout.childAlignment = TextAnchor.MiddleCenter;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = false;
+        layout.childForceExpandHeight = false;
+        var fitter = group.GetComponent<ContentSizeFitter>();
+        fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        var leftHomeIcon = AddHomeIcon(group.transform, "Left");
+        var leftHomeFallback = AddText(group.transform, "★", PortalVisualSettings.HomeIconSize, FontStyles.Normal,
+            PortalVisualSettings.EntryColor);
+        leftHomeFallback.name = "Left Home Favorite Star Fallback";
+        leftHomeFallback.gameObject.SetActive(false);
+
+        var textStack = new GameObject("Portal Name and Biome", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+        textStack.transform.SetParent(group.transform, false);
+        var textLayout = textStack.GetComponent<VerticalLayoutGroup>();
+        textLayout.spacing = 0f;
+        textLayout.childAlignment = TextAnchor.MiddleCenter;
+        textLayout.childControlWidth = true;
+        textLayout.childControlHeight = true;
+        textLayout.childForceExpandWidth = false;
+        textLayout.childForceExpandHeight = false;
+        var textFitter = textStack.GetComponent<ContentSizeFitter>();
+        textFitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+        textFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        nameText = AddText(textStack.transform, label, PortalVisualSettings.EntryFontSize, FontStyles.Normal, PortalVisualSettings.EntryColor);
+        biomeText = AddText(textStack.transform, string.IsNullOrWhiteSpace(biome) ? string.Empty : $"({biome})",
+            PortalVisualSettings.BiomeFontSize, FontStyles.Normal, PortalVisualSettings.BiomeColor);
+
+        var rightHomeIcon = AddHomeIcon(group.transform, "Right");
+        var rightHomeFallback = AddText(group.transform, "★", PortalVisualSettings.HomeIconSize, FontStyles.Normal,
+            PortalVisualSettings.EntryColor);
+        rightHomeFallback.name = "Right Home Favorite Star Fallback";
+        rightHomeFallback.gameObject.SetActive(false);
+        homeIcons = new[] { leftHomeIcon, rightHomeIcon };
+        homeFallbacks = new[] { leftHomeFallback, rightHomeFallback };
+        return group.transform;
+    }
+
+    private static Image AddHomeIcon(Transform parent, string side)
+    {
+        var iconObject = new GameObject($"{side} Home Favorite Star", typeof(RectTransform), typeof(Image), typeof(LayoutElement));
+        iconObject.transform.SetParent(parent, false);
+        var icon = iconObject.GetComponent<Image>();
+        icon.sprite = ResolveHomeSprite();
+        icon.preserveAspect = true;
+        icon.raycastTarget = false;
+        icon.color = Color.white;
+        return icon;
+    }
+
+    private static void NormalizeRowRect(GameObject row)
+    {
+        // Continue carries a HorizontalLayoutGroup. Disabling only its fitter
+        // leaves that group moving our label after every layout rebuild.
+        foreach (var inheritedLayout in row.GetComponents<LayoutGroup>()) inheritedLayout.enabled = false;
+        var aspectFitter = row.GetComponent<AspectRatioFitter>();
+        if (aspectFitter) aspectFitter.enabled = false;
+        var rect = (RectTransform)row.transform;
+        rect.anchorMin = rect.anchorMax = new Vector2(.5f, 1f);
+        rect.pivot = new Vector2(.5f, .5f);
+        rect.anchoredPosition = Vector2.zero;
+        rect.sizeDelta = new Vector2(0f, PortalVisualSettings.RowHeight);
+        rect.localScale = Vector3.one;
+        rect.localRotation = Quaternion.identity;
+        var fitter = row.GetComponent<ContentSizeFitter>();
+        if (fitter) fitter.enabled = false;
+    }
+
+    private static Image[] CreateNormalizedRowKnots(Transform row, Image[] nativeKnots)
+    {
+        var candidates = (nativeKnots ?? Array.Empty<Image>()).Where(image => image && image.sprite).ToArray();
+        if (candidates.Length == 0) return Array.Empty<Image>();
+
+        var ordered = candidates.OrderBy(image => row.InverseTransformPoint(image.rectTransform.position).x).ToArray();
+        var left = candidates.FirstOrDefault(image => image.name.IndexOf("left", StringComparison.OrdinalIgnoreCase) >= 0) ?? ordered.First();
+        var right = candidates.FirstOrDefault(image => image != left && image.name.IndexOf("right", StringComparison.OrdinalIgnoreCase) >= 0) ??
+            ordered.LastOrDefault(image => image != left) ?? left;
+        foreach (var native in nativeKnots)
+        {
+            if (!native) continue;
+            native.enabled = false;
+            native.raycastTarget = false;
+            native.gameObject.SetActive(false);
+        }
+
+        return new[]
+        {
+            CreateRowKnot(row, "BetterPortals Left Knot", left.sprite),
+            CreateRowKnot(row, "BetterPortals Right Knot", right.sprite)
+        };
+    }
+
+    private static Image CreateRowKnot(Transform parent, string name, Sprite sprite)
+    {
+        var knotObject = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(LayoutElement));
+        knotObject.transform.SetParent(parent, false);
+        knotObject.GetComponent<LayoutElement>().ignoreLayout = true;
+        var knot = knotObject.GetComponent<Image>();
+        knot.sprite = sprite;
+        knot.type = Image.Type.Simple;
+        knot.preserveAspect = true;
+        knot.raycastTarget = false;
+        var color = PortalVisualSettings.OrnamentColor;
+        knot.color = new Color(color.r, color.g, color.b, 0f);
+        return knot;
     }
 
     private static TextMeshProUGUI AddText(Transform parent, string value, float size, FontStyles style, Color color)
@@ -1223,18 +2006,18 @@ internal sealed class PortalController : MonoBehaviour
         if (native)
         {
             scaler.uiScaleMode = native.uiScaleMode;
-            scaler.scaleFactor = native.scaleFactor;
             scaler.referenceResolution = native.referenceResolution;
             scaler.screenMatchMode = native.screenMatchMode;
             scaler.matchWidthOrHeight = native.matchWidthOrHeight;
             scaler.referencePixelsPerUnit = native.referencePixelsPerUnit;
             scaler.dynamicPixelsPerUnit = native.dynamicPixelsPerUnit;
-            return;
         }
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920f, 1080f);
-        scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
-        scaler.matchWidthOrHeight = .5f;
+
+        // Menu's GuiScaler recalculates scale from resolution and the player's
+        // GUI Scale setting. A snapshot taken during prewarm is still 1 and
+        // stays tiny at high resolutions. Use the same live scaler as Menu.
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+        if (!scaler.GetComponent<GuiScaler>()) scaler.gameObject.AddComponent<GuiScaler>();
     }
 
     private void SelectDestination(ZDOID destination)
@@ -1300,6 +2083,8 @@ internal sealed class PortalController : MonoBehaviour
             canvasGroup.blocksRaycasts = false;
         }
         fadeTarget = 0f;
+        cursorCenterFrames = 0;
+        ReleaseSelectorCursor();
     }
 
     private void AdvanceFade()
@@ -1317,7 +2102,8 @@ internal sealed class PortalController : MonoBehaviour
         if (selected && selected.transform.IsChildOf(panel.transform)) EventSystem.current.SetSelectedGameObject(null);
         panel.SetActive(false);
         previousMouseInput = null;
-        GameCamera.instance?.UpdateMouseCapture();
+        mouseChoiceArmed = false;
+        ReleaseSelectorCursor();
         if (pendingTeleport) PerformPendingTeleport();
         else if (resetAfterFade) ResetSession(0f);
     }
@@ -1361,29 +2147,52 @@ internal sealed class PortalController : MonoBehaviour
     }
 }
 
-internal sealed class PortalEntryHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, ISelectHandler, IDeselectHandler
+internal sealed class PortalEntryHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler, ISelectHandler, IDeselectHandler
 {
     private TMP_Text label;
+    private TMP_Text biomeLabel;
+    private Transform visualRoot;
     private Image background;
     private Image[] knots = Array.Empty<Image>();
+    private float[] knotSides = Array.Empty<float>();
+    private Image[] homeIcons = Array.Empty<Image>();
+    private TMP_Text[] homeFallbacks = Array.Empty<TMP_Text>();
+    private LayoutElement[] homeIconLayouts = Array.Empty<LayoutElement>();
     private LayoutElement rowLayout;
     private Color normalColor;
+    private Action setHomeAction;
+    private bool isHome;
     private bool interactive;
     private bool selected;
     private bool pointerInside;
     private bool animating;
+    private bool knotsVisible;
     private float currentScale = 1f;
     private float startScale = 1f;
     private float targetScale = 1f;
     private float transitionStarted;
     private float transitionDuration;
+    private readonly Vector3[] rectCorners = new Vector3[4];
 
-    internal void Initialize(TMP_Text rowLabel, Image rowBackground, Image[] rowKnots, bool canInteract)
+    internal ZDOID PortalId { get; private set; }
+    internal bool PointerInside => pointerInside;
+
+    internal void Initialize(TMP_Text rowLabel, TMP_Text rowBiomeLabel, Transform rowVisualRoot, Image rowBackground,
+        Image[] rowKnots, Image[] rowHomeIcons, TMP_Text[] rowHomeFallbacks, ZDOID portalId, bool canInteract, Action onSetHome, bool home)
     {
         label = rowLabel;
+        biomeLabel = rowBiomeLabel;
+        visualRoot = rowVisualRoot;
         background = rowBackground;
         knots = rowKnots ?? Array.Empty<Image>();
+        PrepareKnots();
+        homeIcons = rowHomeIcons ?? Array.Empty<Image>();
+        homeFallbacks = rowHomeFallbacks ?? Array.Empty<TMP_Text>();
+        homeIconLayouts = homeIcons.Select(icon => icon ? icon.GetComponent<LayoutElement>() : null).ToArray();
         rowLayout = GetComponent<LayoutElement>();
+        PortalId = portalId;
+        setHomeAction = onSetHome;
+        isHome = home;
         interactive = canInteract;
         currentScale = startScale = targetScale = 1f;
         ApplyScale(1f);
@@ -1395,8 +2204,41 @@ internal sealed class PortalEntryHover : MonoBehaviour, IPointerEnterHandler, IP
         if (!label || !background) return;
         normalColor = interactive ? PortalVisualSettings.EntryColor : new Color(.55f, .55f, .53f, 1f);
         PortalController.ApplyTextAppearance(label, PortalVisualSettings.EntryFontSize, normalColor);
+        if (biomeLabel)
+        {
+            PortalController.ApplyTextAppearance(biomeLabel, PortalVisualSettings.BiomeFontSize, PortalVisualSettings.BiomeColor);
+            biomeLabel.gameObject.SetActive(interactive && PortalVisualSettings.ShowBiomeSubtitle && !string.IsNullOrWhiteSpace(biomeLabel.text));
+        }
+        var homeSprite = PortalController.ResolveHomeSprite();
+        for (var i = 0; i < homeIcons.Length; i++)
+        {
+            var homeIcon = homeIcons[i];
+            if (!homeIcon) continue;
+            if (!homeIcon.sprite) homeIcon.sprite = homeSprite;
+            var size = PortalVisualSettings.HomeIconSize;
+            var homeIconLayout = i < homeIconLayouts.Length ? homeIconLayouts[i] : null;
+            if (homeIconLayout)
+            {
+                homeIconLayout.preferredWidth = size;
+                homeIconLayout.preferredHeight = size;
+            }
+            homeIcon.gameObject.SetActive(isHome && homeIcon.sprite);
+        }
+        var hasNativeHomeStars = homeIcons.Any(icon => icon && icon.sprite);
+        foreach (var homeFallback in homeFallbacks)
+        {
+            if (!homeFallback) continue;
+            PortalController.ApplyTextAppearance(homeFallback, PortalVisualSettings.HomeIconSize, PortalVisualSettings.EntryColor);
+            homeFallback.gameObject.SetActive(isHome && !hasNativeHomeStars);
+        }
         background.color = Color.clear;
-        if (rowLayout) rowLayout.preferredHeight = PortalVisualSettings.RowHeight;
+        if (rowLayout)
+        {
+            var stackedTextHeight = biomeLabel && biomeLabel.gameObject.activeSelf
+                ? PortalVisualSettings.EntryFontSize + PortalVisualSettings.BiomeFontSize + 6f
+                : PortalVisualSettings.EntryFontSize + 10f;
+            rowLayout.preferredHeight = Mathf.Max(PortalVisualSettings.RowHeight, stackedTextHeight);
+        }
         SetHighlighted(pointerInside || selected);
     }
 
@@ -1414,17 +2256,47 @@ internal sealed class PortalEntryHover : MonoBehaviour, IPointerEnterHandler, IP
         SetHighlighted(pointerInside || selected);
     }
 
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        if (!interactive || setHomeAction == null || eventData.button != PointerEventData.InputButton.Right) return;
+        setHomeAction();
+        eventData.Use();
+    }
+
+    internal void SetAsHome()
+    {
+        if (interactive) setHomeAction?.Invoke();
+    }
+
+    internal void Activate()
+    {
+        if (!interactive) return;
+        GetComponent<Button>()?.onClick.Invoke();
+    }
+
+    internal void SetHome(bool home)
+    {
+        if (isHome == home) return;
+        isHome = home;
+        ApplyVisualSettings();
+    }
+
     public void OnSelect(BaseEventData eventData) { selected = interactive; SetHighlighted(pointerInside || selected); }
     public void OnDeselect(BaseEventData eventData) { selected = false; SetHighlighted(pointerInside || selected); }
 
     private void Update()
     {
-        if (!animating || !label) return;
+        if (!animating || !visualRoot) return;
         var progress = Mathf.Clamp01((Time.unscaledTime - transitionStarted) / Mathf.Max(.001f, transitionDuration));
         var eased = Mathf.SmoothStep(0f, 1f, progress);
         currentScale = Mathf.Lerp(startScale, targetScale, eased);
         ApplyScale(currentScale);
         if (progress >= 1f) animating = false;
+    }
+
+    private void LateUpdate()
+    {
+        if (knotsVisible) PositionKnots();
     }
 
     private void OnDisable()
@@ -1458,18 +2330,122 @@ internal sealed class PortalEntryHover : MonoBehaviour, IPointerEnterHandler, IP
 
     private void ApplyScale(float scale)
     {
-        if (label) label.transform.localScale = Vector3.one * scale;
+        if (visualRoot) visualRoot.localScale = Vector3.one * scale;
+        if (knotsVisible) PositionKnots();
+    }
+
+    private void PrepareKnots()
+    {
+        knotSides = new float[knots.Length];
+        for (var i = 0; i < knots.Length; i++)
+        {
+            var knot = knots[i];
+            if (!knot) continue;
+            var knotRect = knot.rectTransform;
+            var name = knot.name ?? string.Empty;
+            var side = name.IndexOf("left", StringComparison.OrdinalIgnoreCase) >= 0 ? -1f :
+                name.IndexOf("right", StringComparison.OrdinalIgnoreCase) >= 0 ? 1f :
+                i % 2 == 0 ? -1f : 1f;
+            knotSides[i] = side;
+            knotRect.SetParent(transform, false);
+            knotRect.anchorMin = knotRect.anchorMax = new Vector2(.5f, .5f);
+            knotRect.pivot = new Vector2(.5f, .5f);
+            var spriteSize = knot.sprite ? knot.sprite.rect.size : new Vector2(36f, 18f);
+            var aspect = spriteSize.y > .01f ? spriteSize.x / spriteSize.y : 2f;
+            const float height = 18f;
+            knotRect.sizeDelta = new Vector2(Mathf.Clamp(height * aspect, 18f, 64f), height);
+            knot.type = Image.Type.Simple;
+            knot.preserveAspect = true;
+            knotRect.localScale = new Vector3(side < 0f ? 1f : -1f, 1f, 1f);
+            knotRect.localRotation = Quaternion.identity;
+            knotRect.SetAsLastSibling();
+        }
+    }
+
+    private void PositionKnots()
+    {
+        if (knots.Length == 0 || !visualRoot) return;
+        if (!TryGetRenderedTitleBounds(out var left, out var right, out var centerY)) return;
+
+        for (var i = 0; i < knots.Length; i++)
+        {
+            var knot = knots[i];
+            if (!knot) continue;
+            var knotRect = knot.rectTransform;
+            var side = i < knotSides.Length && knotSides[i] < 0f ? -1f : 1f;
+            var halfWidth = Mathf.Abs(knotRect.rect.width) * .5f;
+            var centerX = side < 0f
+                ? left - PortalVisualSettings.RowKnotGap - halfWidth
+                : right + PortalVisualSettings.RowKnotGap + halfWidth;
+            knotRect.anchoredPosition = new Vector2(centerX, centerY);
+        }
+    }
+
+    private bool TryGetRenderedTitleBounds(out float left, out float right, out float centerY)
+    {
+        left = float.PositiveInfinity;
+        right = float.NegativeInfinity;
+        var bottom = float.PositiveInfinity;
+        var top = float.NegativeInfinity;
+
+        foreach (var homeIcon in homeIcons)
+        {
+            if (homeIcon && homeIcon.gameObject.activeSelf)
+                IncludeRectBounds(homeIcon.rectTransform, ref left, ref right, ref bottom, ref top);
+        }
+        foreach (var homeFallback in homeFallbacks)
+        {
+            if (homeFallback && homeFallback.gameObject.activeSelf)
+                IncludeTextBounds(homeFallback, ref left, ref right, ref bottom, ref top);
+        }
+        if (label && label.gameObject.activeSelf)
+        {
+            IncludeTextBounds(label, ref left, ref right, ref bottom, ref top);
+        }
+
+        centerY = float.IsInfinity(bottom) || float.IsInfinity(top) ? 0f : (bottom + top) * .5f;
+        return !float.IsInfinity(left) && !float.IsInfinity(right) && right > left;
+    }
+
+    private void IncludeTextBounds(TMP_Text text, ref float left, ref float right, ref float bottom, ref float top)
+    {
+        text.ForceMeshUpdate();
+        var bounds = text.textBounds;
+        if (bounds.size.x <= .01f || bounds.size.y <= .01f)
+        {
+            IncludeRectBounds(text.rectTransform, ref left, ref right, ref bottom, ref top);
+            return;
+        }
+        IncludePoint(text.transform.TransformPoint(new Vector3(bounds.min.x, bounds.min.y, 0f)), ref left, ref right, ref bottom, ref top);
+        IncludePoint(text.transform.TransformPoint(new Vector3(bounds.max.x, bounds.max.y, 0f)), ref left, ref right, ref bottom, ref top);
+    }
+
+    private void IncludeRectBounds(RectTransform rect, ref float left, ref float right, ref float bottom, ref float top)
+    {
+        rect.GetWorldCorners(rectCorners);
+        for (var i = 0; i < rectCorners.Length; i++) IncludePoint(rectCorners[i], ref left, ref right, ref bottom, ref top);
+    }
+
+    private void IncludePoint(Vector3 worldPoint, ref float left, ref float right, ref float bottom, ref float top)
+    {
+        var local = transform.InverseTransformPoint(worldPoint);
+        left = Mathf.Min(left, local.x);
+        right = Mathf.Max(right, local.x);
+        bottom = Mathf.Min(bottom, local.y);
+        top = Mathf.Max(top, local.y);
     }
 
     private void ApplyKnots(bool highlighted)
     {
         var ornament = PortalVisualSettings.OrnamentColor;
         var enabledByConfig = PortalVisualSettings.ShowRowKnots;
+        knotsVisible = enabledByConfig && highlighted;
         foreach (var knot in knots)
         {
             if (!knot) continue;
             knot.gameObject.SetActive(enabledByConfig);
-            knot.color = new Color(ornament.r, ornament.g, ornament.b, enabledByConfig && highlighted ? ornament.a : 0f);
+            knot.color = new Color(ornament.r, ornament.g, ornament.b, knotsVisible ? ornament.a : 0f);
         }
+        if (knotsVisible) PositionKnots();
     }
 }
