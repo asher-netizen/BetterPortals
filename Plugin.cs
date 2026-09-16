@@ -22,10 +22,13 @@ public sealed class Plugin : BaseUnityPlugin
     internal const int MaxNameLength = 32;
     internal static Plugin Instance;
     internal static readonly Harmony Harmony = new(Guid);
+    internal static ConfigEntry<bool> RespectVanillaItemRestrictions;
 
     private void Awake()
     {
         Instance = this;
+        RespectVanillaItemRestrictions = Config.Bind("Portal Interaction", "Respect Vanilla Item Restrictions", true,
+            "Respect vanilla portal item restrictions on this client, including the source portal's allow-all-items setting. Disable to allow travel with any items.");
         Harmony.PatchAll();
         if (!Application.isBatchMode)
         {
@@ -1141,6 +1144,7 @@ internal sealed class PortalController : MonoBehaviour
     {
         if (!portal || CapturesInput || nonce != 0 || deferredPortal || Time.realtimeSinceStartup < nextOpenAllowed || AnotherModalIsVisible()) return;
         if (!PortalCandidateIsUsable(portal, sourceId)) return;
+        if (!CanTeleportItems(Player.m_localPlayer, portal)) return;
         deferredPortal = portal;
         deferredSource = sourceId;
         deferredStarted = Time.realtimeSinceStartup;
@@ -2039,6 +2043,7 @@ internal sealed class PortalController : MonoBehaviour
     private void SelectDestination(ZDOID destination)
     {
         if (travelPending || nonce == 0 || !SourceIsUsable()) return;
+        if (!CanTeleportItems(Player.m_localPlayer, sourcePortal)) return;
         travelPending = true;
         travelDeadline = Time.realtimeSinceStartup + TravelTimeout;
         if (canvasGroup)
@@ -2052,6 +2057,15 @@ internal sealed class PortalController : MonoBehaviour
             return;
         }
         BeginFadeOut(false);
+    }
+
+    private static bool CanTeleportItems(Player player, TeleportWorld portal)
+    {
+        if (!Plugin.RespectVanillaItemRestrictions.Value) return true;
+        if (!player || !portal) return false;
+        if (player.IsTeleportable(portal.m_allowAllItems)) return true;
+        player.Message(MessageHud.MessageType.Center, "$msg_noteleport");
+        return false;
     }
 
     private bool SourceIsUsable()
@@ -2130,9 +2144,11 @@ internal sealed class PortalController : MonoBehaviour
         var player = Player.m_localPlayer;
         var position = pendingPosition;
         var rotation = pendingRotation;
+        // Recheck after the server response and fade, before ResetSession clears the source portal.
+        var canTeleport = player && CanTeleportItems(player, sourcePortal);
         ResetSession(1.5f);
         GameCamera.instance?.UpdateMouseCapture();
-        if (!player) return;
+        if (!canTeleport) return;
         BypassOnce = true;
         try { player.TeleportTo(position + rotation * Vector3.forward * 2f, rotation, true); }
         finally { BypassOnce = false; }
