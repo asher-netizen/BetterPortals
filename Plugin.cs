@@ -57,6 +57,7 @@ internal static class PortalVisualSettings
     internal const float DefaultRowSpacing = 2f;
     internal const float DefaultMaxListHeight = 414f;
     internal const float DefaultBackdropOpacity = 1f;
+    internal const float DefaultScrollSensitivity = 1f;
     internal const float DefaultFadeInSeconds = .06f;
     internal const float DefaultFadeOutSeconds = .05f;
     internal const float DefaultTriggerMultiplier = 1.5625f;
@@ -100,6 +101,7 @@ internal static class PortalVisualSettings
     private static ConfigEntry<bool> preferHomeOnOpen;
     private static ConfigEntry<bool> showControlHints;
     private static ConfigEntry<KeyboardShortcut> setHomeKeyboardShortcut;
+    private static ConfigEntry<float> scrollSensitivity;
 
     internal static void Bind(ConfigFile config)
     {
@@ -145,6 +147,8 @@ internal static class PortalVisualSettings
             "Maximum visible destination-list height before scrolling.");
         backdropOpacity = BindRange(config, "Visual - Layout", "Dark Backdrop Opacity", DefaultBackdropOpacity, 0f, 1f,
             "Opacity multiplier for Valheim's native dark backdrop; 1 preserves the v20 appearance.");
+        scrollSensitivity = BindRange(config, "Visual - Layout", "Scroll Sensitivity", DefaultScrollSensitivity, .1f, 100f,
+            "Sensitivity multiplier for destination-list.");
 
         ornamentColor = BindColor(config, "Visual - Ornaments", "Ornament and Knot Color", DefaultOrnamentColor,
             "Menu ornament and row-knot color as #RRGGBB or #RRGGBBAA.");
@@ -175,7 +179,7 @@ internal static class PortalVisualSettings
         Watch(titleFontSize); Watch(entryFontSize); Watch(hintFontSize); Watch(biomeFontSize); Watch(homeIconSize);
         Watch(titleColor); Watch(entryColor); Watch(hintColor); Watch(biomeColor);
         Watch(outlineColor); Watch(outlineWidth); Watch(hoverScale); Watch(hoverExpandSeconds); Watch(hoverContractSeconds);
-        Watch(panelWidth); Watch(panelYOffset); Watch(rowHeight); Watch(rowSpacing); Watch(maxListHeight); Watch(backdropOpacity);
+        Watch(panelWidth); Watch(panelYOffset); Watch(rowHeight); Watch(rowSpacing); Watch(maxListHeight); Watch(backdropOpacity); Watch(scrollSensitivity);
         Watch(ornamentColor); Watch(showMenuOrnament); Watch(showRowKnots); Watch(rowKnotGap); Watch(fadeInSeconds); Watch(fadeOutSeconds);
         Watch(triggerMultiplier); Watch(showBiomeSubtitle); Watch(preferHomeOnOpen);
         Watch(showControlHints); Watch(setHomeKeyboardShortcut);
@@ -242,6 +246,7 @@ internal static class PortalVisualSettings
     internal static float RowSpacing => Clamp(rowSpacing, DefaultRowSpacing, 0f, 24f);
     internal static float MaxListHeight => Clamp(maxListHeight, DefaultMaxListHeight, 80f, 900f);
     internal static float BackdropOpacity => Clamp(backdropOpacity, DefaultBackdropOpacity, 0f, 1f);
+    internal static float ScrollSensitivity => Clamp(scrollSensitivity, DefaultScrollSensitivity, .1f, 100f);
     internal static Color OrnamentColor => ParseColor(ornamentColor, DefaultOrnamentColor);
     internal static bool ShowMenuOrnament => showMenuOrnament?.Value ?? true;
     internal static bool ShowRowKnots => showRowKnots?.Value ?? true;
@@ -1409,7 +1414,7 @@ internal sealed class PortalController : MonoBehaviour
         titleText = AddText(panel.transform, "CHOOSE DESTINATION", PortalVisualSettings.TitleFontSize, FontStyles.Normal, PortalVisualSettings.TitleColor);
         hintText = AddText(panel.transform, "Walk away or press Escape to close", PortalVisualSettings.HintFontSize, FontStyles.Normal, PortalVisualSettings.HintColor);
 
-        var scrollObject = new GameObject("Destinations", typeof(RectTransform), typeof(ScrollRect), typeof(LayoutElement));
+        var scrollObject = new GameObject("Destinations", typeof(RectTransform), typeof(ScrollRect), typeof(LayoutElement), typeof(Image));
         scrollObject.transform.SetParent(panel.transform, false);
         scrollLayout = scrollObject.GetComponent<LayoutElement>();
         scrollLayout.preferredHeight = 320f;
@@ -1432,13 +1437,17 @@ internal sealed class PortalController : MonoBehaviour
         contentLayout.childForceExpandHeight = false;
         contentLayout.childForceExpandWidth = true;
         contentObject.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        // make sure mouse scroll actually scrolls when over the list
+        var scrollRaycastTarget = scrollObject.GetComponent<Image>();
+        scrollRaycastTarget.color = Color.clear;
+        scrollRaycastTarget.raycastTarget = true;
         destinationScroll = scrollObject.GetComponent<ScrollRect>();
         destinationScroll.viewport = (RectTransform)viewport.transform;
         destinationScroll.content = cr;
         destinationScroll.horizontal = false;
         destinationScroll.vertical = true;
         destinationScroll.movementType = ScrollRect.MovementType.Clamped;
-        destinationScroll.scrollSensitivity = 32f;
 
         panel.SetActive(false);
         ApplyVisualSettings();
@@ -1466,7 +1475,7 @@ internal sealed class PortalController : MonoBehaviour
         panelRect.anchoredPosition = new Vector2(0f, PortalVisualSettings.PanelYOffset);
         panelRect.sizeDelta = new Vector2(PortalVisualSettings.PanelWidth, 0f);
         if (contentLayout) contentLayout.spacing = PortalVisualSettings.RowSpacing;
-        if (destinationScroll) destinationScroll.scrollSensitivity = Mathf.Max(16f, PortalVisualSettings.RowHeight * .7f);
+        if (destinationScroll) destinationScroll.scrollSensitivity = Mathf.Max(32f, PortalVisualSettings.RowHeight * .7f * PortalVisualSettings.ScrollSensitivity);
 
         ApplyTextAppearance(titleText, PortalVisualSettings.TitleFontSize, PortalVisualSettings.TitleColor);
         ApplyTextAppearance(hintText, PortalVisualSettings.HintFontSize, PortalVisualSettings.HintColor);
